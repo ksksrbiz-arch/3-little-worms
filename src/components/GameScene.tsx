@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { globalGameState, mobileInputs } from '../store/gameStore';
-import { WORLD_SIZE, TURN_SPEED, BOOST_SPEED, BASE_SPEED, type GameState } from '../shared/types';
+import { WORLD_SIZE, TURN_SPEED, BOOST_SPEED, BASE_SPEED, type GameState, type Point, type PlayerStateUpdatePayload } from '../shared/types';
 import * as THREE from 'three';
 import { Sphere, Grid } from '@react-three/drei';
 
@@ -24,6 +24,10 @@ import { getCachedTexture } from '../lib/textureCache';
 // Run client prediction at 60 FPS while capping large frame gaps to avoid catch-up spirals.
 const TARGET_FRAME_TIME = 1 / 60;
 const MAX_FRAME_DELTA = 1 / 30;
+const ORB_COLLECT_RADIUS_SQ = 4;
+const PLAYER_COLLISION_RADIUS_SQ = 2.25;
+const MIN_LENGTH = 10;
+const HAZARD_COLLISION_PADDING = 0.8;
 
 const THEMES: Record<string, { bg: string, cell: string, section: string }> = {
   default: { bg: '#0a0a0a', cell: '#1e3a8a', section: '#3b82f6' },
@@ -35,9 +39,38 @@ const THEMES: Record<string, { bg: string, cell: string, section: string }> = {
 type GameSceneProps = {
   gameState: GameState | null;
   playerId: string | null;
-  sendPlayerState: (data: any) => void;
+  sendPlayerState: (data: PlayerStateUpdatePayload) => void;
   sendCollectOrb: (orbId: string) => void;
 };
+
+function distanceSquared(a: Point, b: Point) {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  return dx * dx + dy * dy;
+}
+
+function clampToBoundary(point: Point, boundary: number) {
+  return {
+    x: Math.max(-boundary, Math.min(boundary, point.x)),
+    y: Math.max(-boundary, Math.min(boundary, point.y)),
+  };
+}
+
+function createPlayerStatePayload(
+  segments: Point[],
+  score: number,
+  currentAngle: number,
+  isBoosting: boolean,
+  state: PlayerStateUpdatePayload['state']
+): PlayerStateUpdatePayload {
+  return {
+    segments,
+    score,
+    currentAngle,
+    isBoosting,
+    state,
+  };
+}
 
 export function GameScene({ gameState, playerId, sendPlayerState, sendCollectOrb }: GameSceneProps) {
   const { profile } = useUserStore();
@@ -50,7 +83,7 @@ export function GameScene({ gameState, playerId, sendPlayerState, sendCollectOrb
 
   const localPlayerRef = useRef<{
     active: boolean;
-    segments: {x: number, y: number}[];
+    segments: Point[];
     score: number;
     currentAngle: number;
     isBoosting: boolean;
@@ -152,20 +185,17 @@ export function GameScene({ gameState, playerId, sendPlayerState, sendCollectOrb
       head.x += Math.cos(localPlayerRef.current.currentAngle) * speed * delta;
       head.y += Math.sin(localPlayerRef.current.currentAngle) * speed * delta;
 
-      // Boundary check
-      const boundary = WORLD_SIZE / 2;
-      if (head.x < -boundary) head.x = -boundary;
-      if (head.x > boundary) head.x = boundary;
-      if (head.y < -boundary) head.y = -boundary;
-      if (head.y > boundary) head.y = boundary;
+      const boundedHead = clampToBoundary(head, WORLD_SIZE / 2);
+      head.x = boundedHead.x;
+      head.y = boundedHead.y;
 
       localPlayerRef.current.segments.unshift(head);
 
       if (localPlayerRef.current.isBoosting) {
         localPlayerRef.current.score -= 2 * delta;
-        if (localPlayerRef.current.score <= 10) {
+        if (localPlayerRef.current.score <= MIN_LENGTH) {
           localPlayerRef.current.isBoosting = false;
-          localPlayerRef.current.score = 10;
+          localPlayerRef.current.score = MIN_LENGTH;
         }
       }
 
@@ -178,9 +208,7 @@ export function GameScene({ gameState, playerId, sendPlayerState, sendCollectOrb
       for (const orbId in gs.orbs) {
         if (localCollectedOrbs.has(orbId)) continue;
         const orb = gs.orbs[orbId];
-        const dx = head.x - orb.x;
-        const dy = head.y - orb.y;
-        if (dx * dx + dy * dy < 4) {
+        if (distanceSquared(head, orb) < ORB_COLLECT_RADIUS_SQ) {
           localPlayerRef.current.score += orb.value;
           localCollectedOrbs.add(orbId);
           delete gs.orbs[orbId]; // predict locally
@@ -204,9 +232,7 @@ export function GameScene({ gameState, playerId, sendPlayerState, sendCollectOrb
         const other = gs.players[otherId];
         if (other.state !== 'alive') continue;
         for (const seg of other.segments) {
-          const dx = head.x - seg.x;
-          const dy = head.y - seg.y;
-          if (dx * dx + dy * dy < 2.25) {
+          if (distanceSquared(head, seg) < PLAYER_COLLISION_RADIUS_SQ) {
             collided = true;
             break;
           }
@@ -218,11 +244,10 @@ export function GameScene({ gameState, playerId, sendPlayerState, sendCollectOrb
         for (const hazId in gs.hazards) {
           const haz = gs.hazards[hazId];
           if (haz.state === 'active') {
-            const dx = head.x - haz.x;
-            const dy = head.y - haz.y;
-            if (dx * dx + dy * dy < (haz.radius + 0.8) * (haz.radius + 0.8)) {
+            const hazardCollisionRadius = haz.radius + HAZARD_COLLISION_PADDING;
+            if (distanceSquared(head, haz) < hazardCollisionRadius * hazardCollisionRadius) {
               localPlayerRef.current.score -= 20 * delta;
-              if (localPlayerRef.current.score <= 10) {
+              if (localPlayerRef.current.score <= MIN_LENGTH) {
                 collided = true;
                 break;
               }
@@ -245,13 +270,13 @@ export function GameScene({ gameState, playerId, sendPlayerState, sendCollectOrb
         audioManager.playDeath();
         if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
         localPlayerRef.current.active = false;
-        sendPlayerState({
-          segments: localPlayerRef.current.segments,
-          score: localPlayerRef.current.score,
-          currentAngle: localPlayerRef.current.currentAngle,
-          isBoosting: false,
-          state: 'dead'
-        });
+        sendPlayerState(createPlayerStatePayload(
+          localPlayerRef.current.segments,
+          localPlayerRef.current.score,
+          localPlayerRef.current.currentAngle,
+          false,
+          'dead'
+        ));
         return;
       }
 
@@ -264,13 +289,13 @@ export function GameScene({ gameState, playerId, sendPlayerState, sendCollectOrb
       // Send state to server at 20Hz
       const now = Date.now();
       if (now - localPlayerRef.current.lastSendTime > 50) {
-        sendPlayerState({
-          segments: localPlayerRef.current.segments,
-          score: localPlayerRef.current.score,
-          currentAngle: localPlayerRef.current.currentAngle,
-          isBoosting: localPlayerRef.current.isBoosting,
-          state: 'alive'
-        });
+        sendPlayerState(createPlayerStatePayload(
+          localPlayerRef.current.segments,
+          localPlayerRef.current.score,
+          localPlayerRef.current.currentAngle,
+          localPlayerRef.current.isBoosting,
+          'alive'
+        ));
         localPlayerRef.current.lastSendTime = now;
       }
 
