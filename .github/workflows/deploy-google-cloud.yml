@@ -37,7 +37,7 @@ jobs:
 
   deploy:
     needs: build
-    if: github.ref_name == (vars.DEPLOY_BRANCH || 'main')
+    if: (vars.DEPLOY_BRANCH != '' && github.ref_name == vars.DEPLOY_BRANCH) || (vars.DEPLOY_BRANCH == '' && github.ref_name == 'main')
     runs-on: ubuntu-latest
     permissions:
       contents: read
