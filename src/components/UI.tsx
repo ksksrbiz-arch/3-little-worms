@@ -156,15 +156,15 @@ let leaderboardCache: { data: any[] | null, expires: number } = { data: null, ex
   }, []);
 
   return (
-    <div className="absolute inset-0 pointer-events-none flex flex-col justify-between p-4">
+    <div className="absolute inset-0 pointer-events-none flex flex-col justify-between p-3 sm:p-4 [padding-bottom:max(0.75rem,env(safe-area-inset-bottom))] [padding-top:max(0.75rem,env(safe-area-inset-top))]">
       {/* Top Bar */}
-      <div className="flex justify-between items-start pointer-events-auto relative">
+      <div className="flex justify-between items-start gap-2 pointer-events-auto relative">
         <div className="flex flex-col gap-2 z-10">
-          <h1 className="text-3xl font-black text-white tracking-tighter" style={{ textShadow: '0 0 10px rgba(255,255,255,0.5)' }}>
+          <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tighter leading-none" style={{ textShadow: '0 0 10px rgba(255,255,255,0.5)' }}>
             NEON.SNAKE
           </h1>
           {isAlive && (
-            <div className="text-xl font-mono text-white/80 font-bold">
+            <div className="text-base sm:text-xl font-mono text-white/80 font-bold">
               Length: {Math.floor(player.score)}
             </div>
           )}
@@ -183,10 +183,10 @@ let leaderboardCache: { data: any[] | null, expires: number } = { data: null, ex
           </div>
         </div>
 
-        <div className="flex items-center gap-4 z-10">
+        <div className="flex items-center gap-2 sm:gap-4 z-10">
           <button
             onClick={handleOpenNewTab}
-            className="flex items-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/20 backdrop-blur-md rounded-full text-white text-sm font-bold transition-colors"
+            className="flex items-center gap-2 p-2 sm:px-4 sm:py-2 bg-white/10 hover:bg-white/20 backdrop-blur-md rounded-full text-white text-sm font-bold transition-colors"
           >
             <ExternalLink size={16} />
             <span className="hidden sm:inline">New Tab</span>
@@ -195,13 +195,13 @@ let leaderboardCache: { data: any[] | null, expires: number } = { data: null, ex
           {user ? (
             <div className="flex items-center gap-2">
               <button title="AI Studio" onClick={() => setShowAICreator(true)} className="p-2 bg-purple-500/20 hover:bg-purple-500/40 border border-purple-500/50 rounded-full text-purple-400 transition-colors pointer-events-auto shadow-[0_0_15px_rgba(168,85,247,0.2)]">
-                <Sparkles size={20} />
+                <Sparkles size={18} className="sm:w-5 sm:h-5" />
               </button>
               <button onClick={() => setShowShop(true)} className="p-2 bg-yellow-500/20 hover:bg-yellow-500/40 border border-yellow-500/50 rounded-full text-yellow-400 transition-colors pointer-events-auto shadow-[0_0_15px_rgba(234,179,8,0.2)]">
-                <ShoppingCart size={20} />
+                <ShoppingCart size={18} className="sm:w-5 sm:h-5" />
               </button>
               <button onClick={() => setShowSettings(!showSettings)} className="p-2 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors pointer-events-auto">
-                <Settings size={20} />
+                <Settings size={18} className="sm:w-5 sm:h-5" />
               </button>
             </div>
           ) : (
@@ -219,7 +219,7 @@ let leaderboardCache: { data: any[] | null, expires: number } = { data: null, ex
 
       {/* Leaderboard */}
       {(!isAlive || globalLeaderboard.length > 0) && (
-        <div className="absolute top-20 right-4 w-64 bg-black/40 backdrop-blur-md rounded-2xl p-4 border border-white/10 pointer-events-auto max-h-[50vh] overflow-y-auto">
+        <div className={`absolute top-20 right-3 sm:right-4 w-[calc(100vw-1.5rem)] sm:w-64 bg-black/40 backdrop-blur-md rounded-2xl p-3 sm:p-4 border border-white/10 pointer-events-auto max-h-[40vh] sm:max-h-[50vh] overflow-y-auto ${isAlive ? 'hidden sm:block' : ''}`}>
           <div className="flex items-center gap-2 mb-4 text-white/80 font-semibold">
             <Trophy size={18} className="text-yellow-400" />
             <h2>GLOBAL TOP 10</h2>
@@ -313,9 +313,9 @@ let leaderboardCache: { data: any[] | null, expires: number } = { data: null, ex
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.9 }}
-            className="absolute inset-0 flex items-center justify-center pointer-events-auto bg-black/60 backdrop-blur-sm z-50"
-          >
-            <div className="bg-zinc-900/90 p-8 rounded-3xl border border-white/10 shadow-2xl max-w-md w-full flex flex-col items-center gap-6">
+            className="absolute inset-0 flex items-center justify-center pointer-events-auto bg-black/60 backdrop-blur-sm z-50 p-4"
+           >
+            <div className="bg-zinc-900/90 p-6 sm:p-8 rounded-3xl border border-white/10 shadow-2xl max-w-md w-full flex flex-col items-center gap-6">
               {isDead && (
                 <div className="text-center">
                   <h2 className="text-4xl font-black text-red-500 mb-2">YOU DIED</h2>
@@ -343,11 +343,11 @@ let leaderboardCache: { data: any[] | null, expires: number } = { data: null, ex
 
       {/* Mobile Controls */}
       {isAlive && (
-        <div className="absolute inset-x-0 bottom-4 pointer-events-none flex justify-between px-8 sm:hidden z-40 select-none touch-none pb-8">
+        <div className="absolute inset-x-0 bottom-3 pointer-events-none flex justify-between px-6 sm:hidden z-40 select-none touch-none [padding-bottom:max(1.25rem,env(safe-area-inset-bottom))]">
           {/* Joystick */}
           <div 
             ref={joyRef}
-            className="w-32 h-32 bg-white/5 active:bg-white/10 backdrop-blur-md rounded-full border border-white/20 touch-none pointer-events-auto relative flex items-center justify-center opacity-70"
+            className="w-28 h-28 bg-white/5 active:bg-white/10 backdrop-blur-md rounded-full border border-white/20 touch-none pointer-events-auto relative flex items-center justify-center opacity-70"
             onPointerDown={(e) => { e.preventDefault(); handleJoyMove(e); }}
             onPointerMove={(e) => { e.preventDefault(); if (e.buttons > 0) handleJoyMove(e); }}
             onPointerUp={(e) => { e.preventDefault(); handleJoyEnd(); }}
@@ -356,21 +356,21 @@ let leaderboardCache: { data: any[] | null, expires: number } = { data: null, ex
             onContextMenu={(e) => e.preventDefault()}
           >
             <div 
-              className="w-12 h-12 bg-white/50 rounded-full shadow-[0_0_15px_rgba(255,255,255,0.5)] pointer-events-none transition-transform duration-75"
+              className="w-10 h-10 bg-white/50 rounded-full shadow-[0_0_15px_rgba(255,255,255,0.5)] pointer-events-none transition-transform duration-75"
               style={{ transform: `translate(${joyPos.x}px, ${joyPos.y}px)` }}
             />
           </div>
           
           {/* Boost */}
           <button
-            className="w-24 h-24 bg-yellow-500/20 active:bg-yellow-500/50 backdrop-blur-md rounded-full flex items-center justify-center text-yellow-500 pointer-events-auto border border-yellow-500/50 touch-none select-none self-end mb-4 shadow-[0_0_20px_rgba(234,179,8,0.3)]"
+            className="w-20 h-20 bg-yellow-500/20 active:bg-yellow-500/50 backdrop-blur-md rounded-full flex items-center justify-center text-yellow-500 pointer-events-auto border border-yellow-500/50 touch-none select-none self-end mb-4 shadow-[0_0_20px_rgba(234,179,8,0.3)]"
             onPointerDown={(e) => { e.preventDefault(); mobileInputs.boost = true; if (navigator.vibrate) navigator.vibrate(15); }}
             onPointerUp={(e) => { e.preventDefault(); mobileInputs.boost = false; }}
             onPointerLeave={(e) => { e.preventDefault(); mobileInputs.boost = false; }}
             onPointerCancel={(e) => { e.preventDefault(); mobileInputs.boost = false; }}
             onContextMenu={(e) => e.preventDefault()}
           >
-            <Zap size={40} className="fill-yellow-500" />
+            <Zap size={34} className="fill-yellow-500" />
           </button>
         </div>
       )}

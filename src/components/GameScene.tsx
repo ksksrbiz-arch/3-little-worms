@@ -30,7 +30,8 @@ const THEMES: Record<string, { bg: string, cell: string, section: string }> = {
 export function GameScene() {
   const { gameState, playerId, sendPlayerState, sendCollectOrb } = useGameStore();
   const { profile } = useUserStore();
-  const { camera } = useThree();
+  const { camera, size } = useThree();
+  const isNarrowView = size.width < 640;
   const inputs = useRef({ left: false, right: false, boost: false });
   const lightRef = useRef<THREE.DirectionalLight>(null);
   const [lightTarget] = useState(() => new THREE.Object3D());
@@ -52,6 +53,13 @@ export function GameScene() {
     wasBoosting: false,
     lastSendTime: 0,
   });
+
+  const getCameraZ = (score: number) => {
+    if (isNarrowView) {
+      return Math.min(70, Math.max(38, 34 + score * 0.35));
+    }
+    return Math.min(45, Math.max(20, 20 + score * 0.2));
+  };
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -95,6 +103,9 @@ export function GameScene() {
         localPlayerRef.current.segments = [...serverPlayer.segments];
         localPlayerRef.current.score = serverPlayer.score;
         localPlayerRef.current.currentAngle = serverPlayer.currentAngle;
+        const head = serverPlayer.segments[0];
+        camera.position.set(head.x, head.y, getCameraZ(serverPlayer.score));
+        camera.lookAt(head.x, head.y, 0);
       }
 
       if (!localPlayerRef.current.active) return;
@@ -232,7 +243,7 @@ export function GameScene() {
         localPlayerRef.current.lastSendTime = now;
       }
 
-      const targetZ = Math.min(45, Math.max(20, 20 + localPlayerRef.current.score * 0.2));
+      const targetZ = getCameraZ(localPlayerRef.current.score);
       
       // Smooth camera follow predicted head
       camera.position.x += (head.x - camera.position.x) * 10 * delta;
