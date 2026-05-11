@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { X, Sparkles, Image as ImageIcon, Loader2 } from 'lucide-react';
+
 import { GoogleGenAI } from '@google/genai';
 import { useUserStore } from '../store/userStore';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
@@ -53,7 +54,7 @@ export function AICreator({ onClose }: { onClose: () => void }) {
     setGeneratedImages([]);
     
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const ai = new GoogleGenAI({ apiKey: process.env.AI_API_KEY });
       
       const p = type === 'skin' ? `A seamless repeating texture pattern of: ${prompt}. Colorful, vibrant, suitable for a 3d snake body texture` : `A background space environment of: ${prompt}. Abstract, dark background suitable for a top-down game background`;
       
@@ -113,7 +114,7 @@ export function AICreator({ onClose }: { onClose: () => void }) {
         </button>
 
         <h2 className="text-2xl font-bold text-white flex items-center gap-2 mb-6">
-          <Sparkles className="text-purple-400" /> AI Studio
+          <Sparkles className="text-purple-400" /> AI Creator
         </h2>
 
         {!user ? (
