@@ -126,8 +126,8 @@ io.on('connection', (socket) => {
       currentAngle: angle,
       inputs: { left: false, right: false, boost: false },
     };
-
     socket.emit('init', socket.id);
+    socket.emit('state', state);
   });
 
   socket.on('update_state', (data: { segments: any[], score: number, currentAngle: number, isBoosting: boolean, state: string }) => {
@@ -285,7 +285,15 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static('dist'));
+    app.use(express.static('dist', {
+      maxAge: '1y',
+      immutable: true,
+      setHeaders: (res, filePath) => {
+        if (!filePath.includes('/assets/')) {
+          res.setHeader('Cache-Control', 'no-cache');
+        }
+      },
+    }));
   }
 
   httpServer.listen(PORT, '0.0.0.0', () => {

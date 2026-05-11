@@ -5,7 +5,7 @@
 
 import { create } from 'zustand';
 import { io, Socket } from 'socket.io-client';
-import { GameState, Player } from '../shared/types';
+import { GameState, INITIAL_LENGTH, Player, SEGMENT_SPACING } from '../shared/types';
 
 interface GameStore {
   socket: Socket | null;
@@ -29,6 +29,26 @@ function emitJoin(socket: Socket) {
   socket.emit('join', pendingJoinOptions);
   pendingJoinRequested = false;
   pendingJoinOptions = undefined;
+}
+
+function createLocalPlayer(id: string, options?: { name?: string, color?: string }): Player {
+  const angle = 0;
+  const segments = Array.from({ length: INITIAL_LENGTH }, (_, i) => ({
+    x: -Math.cos(angle) * i * SEGMENT_SPACING,
+    y: -Math.sin(angle) * i * SEGMENT_SPACING,
+  }));
+
+  return {
+    id,
+    name: options?.name || 'Snake',
+    color: options?.color || '#50fa7b',
+    segments,
+    score: INITIAL_LENGTH,
+    isBoosting: false,
+    state: 'alive',
+    currentAngle: angle,
+    inputs: { left: false, right: false, boost: false },
+  };
 }
 
 export const useGameStore = create<GameStore>((set, get) => ({
@@ -56,6 +76,16 @@ export const useGameStore = create<GameStore>((set, get) => ({
     });
 
     socket.on('state', (state: GameState) => {
+      const currentId = get().playerId;
+      if (currentId && !state.players[currentId]) {
+        const currentPlayer = get().gameState?.players[currentId] || createLocalPlayer(currentId, pendingJoinOptions);
+        const visibleOrbs = Object.fromEntries(Object.entries(state.orbs).slice(0, 150));
+        state = {
+          ...state,
+          players: { [currentId]: currentPlayer },
+          orbs: visibleOrbs,
+        };
+      }
       globalGameState.current = state;
       const now = Date.now();
       if (now - lastUiUpdate > 100) { // Throttle React updates to 10Hz
@@ -77,6 +107,22 @@ export const useGameStore = create<GameStore>((set, get) => ({
     }
 
     if (socket.connected) {
+      const id = socket.id;
+      if (id) {
+        const state = globalGameState.current || get().gameState || { players: {}, orbs: {}, leaderboard: [], hazards: {} };
+        const visibleOrbs = Object.fromEntries(Object.entries(state.orbs).slice(0, 150));
+        if (!state.players[id]) {
+          const nextState = {
+            ...state,
+            players: { [id]: createLocalPlayer(id, options) },
+            orbs: visibleOrbs,
+          };
+          globalGameState.current = nextState;
+          set({ playerId: id, gameState: nextState });
+        } else {
+          set({ playerId: id });
+        }
+      }
       emitJoin(socket);
     }
   },

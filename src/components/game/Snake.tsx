@@ -1,10 +1,11 @@
 import React, { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { Sphere, Text } from '@react-three/drei';
+import { Sphere } from '@react-three/drei';
 import * as THREE from 'three';
 import { globalGameState } from '../../store/gameStore';
+import { getCachedTexture } from '../../lib/textureCache';
 
-export function Snake({ playerId, color, isLocal, name }: { playerId: string, color: string, isLocal: boolean, name?: string }) {
+export const Snake = React.memo(function Snake({ playerId, color, isLocal, name }: { playerId: string, color: string, isLocal: boolean, name?: string }) {
   const bodyRef = useRef<THREE.InstancedMesh>(null);
   const headRef = useRef<THREE.Mesh>(null);
   const particlesRef = useRef<THREE.InstancedMesh>(null);
@@ -25,11 +26,10 @@ export function Snake({ playerId, color, isLocal, name }: { playerId: string, co
   const baseColorObj = useMemo(() => new THREE.Color(skin.color), [skin.color]);
   const customTexture = useMemo(() => {
     if (skin.isCustom && skin.customUrl) {
-       const loader = new THREE.TextureLoader();
-       const tex = loader.load(skin.customUrl);
-       tex.wrapS = THREE.RepeatWrapping;
-       tex.wrapT = THREE.RepeatWrapping;
-       return tex;
+       return getCachedTexture(skin.customUrl, (tex) => {
+         tex.wrapS = THREE.RepeatWrapping;
+         tex.wrapT = THREE.RepeatWrapping;
+       });
     }
     return null;
   }, [skin.customUrl]);
@@ -212,18 +212,6 @@ export function Snake({ playerId, color, isLocal, name }: { playerId: string, co
           toneMapped={false}
           onBeforeCompile={shaderSetup}
         />
-        {name && (
-          <Text
-            position={[0, 1.5, 0]}
-            fontSize={0.5}
-            color="white"
-            outlineWidth={0.05}
-            outlineColor="black"
-            font="https://fonts.gstatic.com/s/inter/v12/UcCO3FwrK3iLTeHuS_fvQtMwCp50KnMw2boKoduKmMEVuLyfAZ9hiA.woff2"
-          >
-            {name}
-          </Text>
-        )}
       </Sphere>
       <instancedMesh ref={bodyRef} args={[null as any, null as any, 2000]} castShadow receiveShadow frustumCulled={false}>
         <sphereGeometry args={[0.6, 16, 16]} />
@@ -252,4 +240,4 @@ export function Snake({ playerId, color, isLocal, name }: { playerId: string, co
       )}
     </group>
   );
-}
+});

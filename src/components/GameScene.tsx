@@ -5,8 +5,8 @@
 
 import { useEffect, useRef, useState, useMemo } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
-import { useGameStore, globalGameState, mobileInputs } from '../store/gameStore';
-import { WORLD_SIZE, TURN_SPEED, BOOST_SPEED, BASE_SPEED } from '../shared/types';
+import { globalGameState, mobileInputs } from '../store/gameStore';
+import { WORLD_SIZE, TURN_SPEED, BOOST_SPEED, BASE_SPEED, type GameState } from '../shared/types';
 import * as THREE from 'three';
 import { Sphere, Grid } from '@react-three/drei';
 
@@ -19,6 +19,10 @@ import { localCollectedOrbs } from './game/utils';
 
 import { useUserStore } from '../store/userStore';
 import { audioManager } from '../lib/audio';
+import { getCachedTexture } from '../lib/textureCache';
+
+const TARGET_FRAME_TIME = 1 / 60;
+const MAX_FRAME_DELTA = 1 / 30;
 
 const THEMES: Record<string, { bg: string, cell: string, section: string }> = {
   default: { bg: '#0a0a0a', cell: '#1e3a8a', section: '#3b82f6' },
@@ -27,13 +31,20 @@ const THEMES: Record<string, { bg: string, cell: string, section: string }> = {
   synthwave: { bg: '#0f0524', cell: '#7c3aed', section: '#f472b6' }
 };
 
-export function GameScene() {
-  const { gameState, playerId, sendPlayerState, sendCollectOrb } = useGameStore();
+type GameSceneProps = {
+  gameState: GameState | null;
+  playerId: string | null;
+  sendPlayerState: (data: any) => void;
+  sendCollectOrb: (orbId: string) => void;
+};
+
+export function GameScene({ gameState, playerId, sendPlayerState, sendCollectOrb }: GameSceneProps) {
   const { profile } = useUserStore();
   const { camera, size } = useThree();
   const isNarrowView = size.width < 640;
   const inputs = useRef({ left: false, right: false, boost: false });
   const lightRef = useRef<THREE.DirectionalLight>(null);
+  const frameAccumulator = useRef(0);
   const [lightTarget] = useState(() => new THREE.Object3D());
 
   const localPlayerRef = useRef<{
@@ -60,6 +71,19 @@ export function GameScene() {
     }
     return Math.min(45, Math.max(20, 20 + score * 0.2));
   };
+
+  useEffect(() => {
+    globalGameState.current = gameState;
+  }, [gameState]);
+
+  useEffect(() => {
+    const player = playerId && gameState ? gameState.players[playerId] : null;
+    const head = player?.state === 'alive' ? player.segments[0] : null;
+    if (!player || !head) return;
+
+    camera.position.set(head.x, head.y, getCameraZ(player.score));
+    camera.lookAt(head.x, head.y, 0);
+  }, [camera, gameState, isNarrowView, playerId]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -90,7 +114,12 @@ export function GameScene() {
     };
   }, []);
 
-  useFrame((state, delta) => {
+  useFrame((state, rawDelta) => {
+    frameAccumulator.current = Math.min(frameAccumulator.current + rawDelta, MAX_FRAME_DELTA);
+    if (frameAccumulator.current < TARGET_FRAME_TIME) return;
+    const delta = TARGET_FRAME_TIME;
+    frameAccumulator.current = Math.max(0, frameAccumulator.current - TARGET_FRAME_TIME);
+
     const gs = globalGameState.current;
     if (!gs || !playerId) return;
     
@@ -264,12 +293,11 @@ export function GameScene() {
   const activeTheme = profile?.theme && THEMES[profile.theme] ? THEMES[profile.theme] : THEMES.default;
   const customBgTexture = useMemo(() => {
     if (profile?.customBackground && profile.customBackground.startsWith('data:image')) {
-      const loader = new THREE.TextureLoader();
-      const tex = loader.load(profile.customBackground);
-      tex.wrapS = THREE.RepeatWrapping;
-      tex.wrapT = THREE.RepeatWrapping;
-      tex.repeat.set(5, 5); // Tile the texture
-      return tex;
+      return getCachedTexture(profile.customBackground, (tex) => {
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        tex.repeat.set(5, 5); // Tile the texture
+      });
     }
     return null;
   }, [profile?.customBackground]);
@@ -318,23 +346,27 @@ export function GameScene() {
         />
       )}
 
-      <Orbs />
-      <DeathExplosions />
-      <BackgroundDust WORLD_SIZE={WORLD_SIZE} />
-      <Hazards />
+      {playerId && (
+        <>
+          <Orbs />
+          <DeathExplosions />
+          <BackgroundDust WORLD_SIZE={WORLD_SIZE} />
+          <Hazards />
 
-      {Object.values(gameState.players).map((player) => {
-        if (player.state !== 'alive' || player.segments.length === 0) return null;
-        return (
-          <Snake
-            key={player.id}
-            playerId={player.id}
-            color={player.color}
-            isLocal={player.id === playerId}
-            name={player.name}
-          />
-        );
-      })}
+          {Object.values(gameState.players).map((player) => {
+            if (player.state !== 'alive' || player.segments.length === 0) return null;
+            return (
+              <Snake
+                key={player.id}
+                playerId={player.id}
+                color={player.color}
+                isLocal={player.id === playerId}
+                name={player.name}
+              />
+            );
+          })}
+        </>
+      )}
     </>
   );
 }

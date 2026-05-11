@@ -7,12 +7,24 @@ import { useGameStore, mobileInputs } from '../store/gameStore';
 import { useUserStore } from '../store/userStore';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ExternalLink, Trophy, ArrowLeft, ArrowRight, Zap, User, Settings, LogOut, ShoppingCart, Sparkles } from 'lucide-react';
-import { useEffect, useState, useRef } from 'react';
+import { lazy, Suspense, useEffect, useState, useRef } from 'react';
 import { db } from '../firebase';
 import { doc, setDoc, serverTimestamp, getDocs, collection, query, orderBy, limit } from 'firebase/firestore';
-import { Shop } from './Shop';
-import { AICreator } from './AICreator';
 import { audioManager } from '../lib/audio';
+import { getCached, invalidateCached } from '../lib/dynamicCache';
+
+const Shop = lazy(() => import('./Shop').then((module) => ({ default: module.Shop })));
+const AICreator = lazy(() => import('./AICreator').then((module) => ({ default: module.AICreator })));
+const LEADERBOARD_CACHE_KEY = 'leaderboard:top10';
+const LEADERBOARD_CACHE_TTL_MS = 30_000;
+
+function ModalFallback() {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <div className="h-10 w-10 rounded-full border-4 border-white/20 border-t-white animate-spin" />
+    </div>
+  );
+}
 
 export function UI() {
   const { gameState, playerId, isConnected, joinGame } = useGameStore();
@@ -63,21 +75,15 @@ export function UI() {
     mobileInputs.right = false;
   };
 
-
-let leaderboardCache: { data: any[] | null, expires: number } = { data: null, expires: 0 };
-
   useEffect(() => {
     // Fetch global leaderboard
     const fetchLeaderboard = async () => {
       try {
-        if (Date.now() < leaderboardCache.expires && leaderboardCache.data) {
-          setGlobalLeaderboard(leaderboardCache.data);
-          return;
-        }
-        const q = query(collection(db, 'leaderboard'), orderBy('score', 'desc'), limit(10));
-        const snap = await getDocs(q);
-        const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        leaderboardCache = { data, expires: Date.now() + 30000 }; // 30s cache
+        const data = await getCached(LEADERBOARD_CACHE_KEY, LEADERBOARD_CACHE_TTL_MS, async () => {
+          const q = query(collection(db, 'leaderboard'), orderBy('score', 'desc'), limit(10));
+          const snap = await getDocs(q);
+          return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        });
         setGlobalLeaderboard(data);
       } catch (err) {
         console.error(err);
@@ -109,12 +115,11 @@ let leaderboardCache: { data: any[] | null, expires: number } = { data: null, ex
   }, [user, profile]);
 
   const handleJoinGame = () => {
-    audioManager.init();
-    if (profile) {
-      joinGame({ name: profile.displayName, color: profile.skin === 'default' ? undefined : profile.skin });
-    } else {
-      joinGame();
-    }
+    window.setTimeout(() => audioManager.init(), 0);
+    const options = profile
+      ? { name: profile.displayName, color: profile.skin === 'default' ? undefined : profile.skin }
+      : undefined;
+    window.setTimeout(() => joinGame(options), 0);
   };
 
   useEffect(() => {
@@ -128,14 +133,16 @@ let leaderboardCache: { data: any[] | null, expires: number } = { data: null, ex
         name: player.name,
         color: player.color,
         createdAt: serverTimestamp(),
-      }).catch(err => {
-        const errInfo = {
-          error: err instanceof Error ? err.message : String(err),
-          operationType: 'create',
-          path: 'leaderboard'
-        };
-        console.error(JSON.stringify(errInfo));
-      });
+      })
+        .then(() => invalidateCached(LEADERBOARD_CACHE_KEY))
+        .catch(err => {
+          const errInfo = {
+            error: err instanceof Error ? err.message : String(err),
+            operationType: 'create',
+            path: 'leaderboard'
+          };
+          console.error(JSON.stringify(errInfo));
+        });
     }
   }, [isDead]);
 
@@ -245,12 +252,20 @@ let leaderboardCache: { data: any[] | null, expires: number } = { data: null, ex
 
       {/* Shop Modal */}
       <AnimatePresence>
-        {showShop && <Shop onClose={() => setShowShop(false)} />}
+        {showShop && (
+          <Suspense fallback={<ModalFallback />}>
+            <Shop onClose={() => setShowShop(false)} />
+          </Suspense>
+        )}
       </AnimatePresence>
 
       {/* AI Creator Modal */}
       <AnimatePresence>
-        {showAICreator && <AICreator onClose={() => setShowAICreator(false)} />}
+        {showAICreator && (
+          <Suspense fallback={<ModalFallback />}>
+            <AICreator onClose={() => setShowAICreator(false)} />
+          </Suspense>
+        )}
       </AnimatePresence>
 
       {/* Settings Modal */}

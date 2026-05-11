@@ -3,7 +3,7 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { globalGameState } from '../../store/gameStore';
 
-export function DeathExplosions() {
+export const DeathExplosions = React.memo(function DeathExplosions() {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
   const colorObj = useMemo(() => new THREE.Color(), []);
@@ -97,4 +97,4 @@ export function DeathExplosions() {
       />
     </instancedMesh>
   );
-}
+});
