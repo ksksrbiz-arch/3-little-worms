@@ -51,7 +51,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     set({ ws });
   },
-  joinGame: (options?) => {
+  joinGame: (options?: { name?: string; color?: string }) => {
     const { ws } = get();
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'join', ...options }));

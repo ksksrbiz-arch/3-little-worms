@@ -73,8 +73,8 @@ export class GameRoom {
       const playerId = this.wsToPlayer.get(ws);
 
       if (msg.type === 'join') {
-        const name: string = msg.name || `Snake-${this.snakeCounter++}`;
-        const color: string = msg.color || COLORS[Math.floor(Math.random() * COLORS.length)];
+        const name = msg.name || `Snake-${this.snakeCounter++}`;
+        const color = msg.color || COLORS[Math.floor(Math.random() * COLORS.length)];
         const startX = (Math.random() - 0.5) * (WORLD_SIZE - 20);
         const startY = (Math.random() - 0.5) * (WORLD_SIZE - 20);
         const angle = Math.random() * Math.PI * 2;
