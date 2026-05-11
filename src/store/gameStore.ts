@@ -54,6 +54,17 @@ function createLocalPlayer(id: string, options?: { name?: string, color?: string
   };
 }
 
+function limitOptimisticOrbs(orbs: GameState['orbs']) {
+  const visibleOrbs: GameState['orbs'] = {};
+  let count = 0;
+  for (const id in orbs) {
+    visibleOrbs[id] = orbs[id];
+    count++;
+    if (count >= MAX_OPTIMISTIC_ORBS) break;
+  }
+  return visibleOrbs;
+}
+
 export const useGameStore = create<GameStore>((set, get) => ({
   socket: null,
   isConnected: false,
@@ -82,11 +93,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const currentId = get().playerId;
       if (currentId && !state.players[currentId]) {
         const currentPlayer = get().gameState?.players[currentId] || createLocalPlayer(currentId, lastJoinOptions);
-        const visibleOrbs = Object.fromEntries(Object.entries(state.orbs).slice(0, MAX_OPTIMISTIC_ORBS));
         state = {
           ...state,
           players: { [currentId]: currentPlayer },
-          orbs: visibleOrbs,
+          orbs: limitOptimisticOrbs(state.orbs),
         };
       }
       globalGameState.current = state;
@@ -114,12 +124,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const id = socket.id;
       if (id) {
         const state = globalGameState.current || get().gameState || { players: {}, orbs: {}, leaderboard: [], hazards: {} };
-        const visibleOrbs = Object.fromEntries(Object.entries(state.orbs).slice(0, MAX_OPTIMISTIC_ORBS));
         if (!state.players[id]) {
           const nextState = {
             ...state,
             players: { [id]: createLocalPlayer(id, options) },
-            orbs: visibleOrbs,
+            orbs: limitOptimisticOrbs(state.orbs),
           };
           globalGameState.current = nextState;
           set({ playerId: id, gameState: nextState });
