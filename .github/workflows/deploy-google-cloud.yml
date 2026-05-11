@@ -69,11 +69,20 @@ jobs:
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
 
+      - name: Build container image
+        run: |
+          IMAGE="gcr.io/${GCP_PROJECT_ID}/${CLOUD_RUN_SERVICE}:${GITHUB_SHA}"
+          gcloud builds submit . \
+            --config cloudbuild.yaml \
+            --substitutions "_IMAGE=${IMAGE}" \
+            --project "${GCP_PROJECT_ID}" \
+            --quiet
+
       - name: Deploy to Cloud Run
         run: |
+          IMAGE="gcr.io/${GCP_PROJECT_ID}/${CLOUD_RUN_SERVICE}:${GITHUB_SHA}"
           gcloud run deploy "${CLOUD_RUN_SERVICE}" \
-            --source . \
-            --clear-build-service-account \
+            --image "${IMAGE}" \
             --project "${GCP_PROJECT_ID}" \
             --region "${GCP_REGION}" \
             --quiet

@@ -3,11 +3,11 @@ steps:
     args:
       - build
       - --tag
-      - gcr.io/$PROJECT_ID/$REPO_NAME:$COMMIT_SHA
+      - ${_IMAGE}
       - .
 
 images:
-  - gcr.io/$PROJECT_ID/$REPO_NAME:$COMMIT_SHA
+  - ${_IMAGE}
 
 options:
   logging: CLOUD_LOGGING_ONLY
