@@ -18,3 +18,28 @@ View your app in AI Studio: https://ai.studio/apps/f96da052-6138-454f-acf9-c6d6e
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
+
+## Deployment (Google Cloud Run)
+
+This repository is configured to deploy to **Google Cloud Run** from GitHub Actions.
+
+- Workflow: `.github/workflows/deploy-google-cloud.yml`
+- Every push runs lint + build
+- Pushes to the default branch also deploy to Cloud Run
+
+### Required GitHub repository variables
+
+- `GCP_PROJECT_ID` (your Google Cloud project ID)
+- `GCP_REGION` (example: `us-west2`)
+- `CLOUD_RUN_SERVICE` (Cloud Run service name)
+
+### Optional GitHub repository variables
+
+- `DEPLOY_BRANCH` (branch name to deploy from; defaults to `main`)
+
+### Required GitHub repository secrets
+
+- `GCP_WORKLOAD_IDENTITY_PROVIDER`
+- `GCP_SERVICE_ACCOUNT`
+
+No Cloudflare deployment configuration is used by this repository.
