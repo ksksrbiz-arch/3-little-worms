@@ -46,6 +46,7 @@ jobs:
       GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
       GCP_REGION: ${{ vars.GCP_REGION }}
       CLOUD_RUN_SERVICE: ${{ vars.CLOUD_RUN_SERVICE }}
+      IMAGE: gcr.io/${{ vars.GCP_PROJECT_ID }}/${{ vars.CLOUD_RUN_SERVICE }}:${{ github.sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -71,7 +72,6 @@ jobs:
 
       - name: Build container image
         run: |
-          IMAGE="gcr.io/${GCP_PROJECT_ID}/${CLOUD_RUN_SERVICE}:${GITHUB_SHA}"
           gcloud builds submit . \
             --config cloudbuild.yaml \
             --substitutions "_IMAGE=${IMAGE}" \
@@ -80,7 +80,6 @@ jobs:
 
       - name: Deploy to Cloud Run
         run: |
-          IMAGE="gcr.io/${GCP_PROJECT_ID}/${CLOUD_RUN_SERVICE}:${GITHUB_SHA}"
           gcloud run deploy "${CLOUD_RUN_SERVICE}" \
             --image "${IMAGE}" \
             --project "${GCP_PROJECT_ID}" \
