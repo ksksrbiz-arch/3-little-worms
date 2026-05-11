@@ -43,9 +43,9 @@ jobs:
       contents: read
       id-token: write
     env:
-      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID != '' && vars.GCP_PROJECT_ID || secrets.GCP_PROJECT_ID }}
-      GCP_REGION: ${{ vars.GCP_REGION != '' && vars.GCP_REGION || secrets.GCP_REGION }}
-      CLOUD_RUN_SERVICE: ${{ vars.CLOUD_RUN_SERVICE != '' && vars.CLOUD_RUN_SERVICE || secrets.CLOUD_RUN_SERVICE }}
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID || secrets.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ vars.GCP_REGION || secrets.GCP_REGION }}
+      CLOUD_RUN_SERVICE: ${{ vars.CLOUD_RUN_SERVICE || secrets.CLOUD_RUN_SERVICE }}
       GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
       GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
     steps:
@@ -54,6 +54,7 @@ jobs:
 
       - name: Resolve deployment configuration
         id: deploy-config
+        shell: bash
         run: |
           missing=()
           test -n "${GCP_PROJECT_ID}" || missing+=("GCP_PROJECT_ID (repository variable or secret)")
