@@ -43,33 +43,48 @@ jobs:
       contents: read
       id-token: write
     env:
-      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
-      GCP_REGION: ${{ vars.GCP_REGION }}
-      CLOUD_RUN_SERVICE: ${{ vars.CLOUD_RUN_SERVICE }}
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID != '' && vars.GCP_PROJECT_ID || secrets.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ vars.GCP_REGION != '' && vars.GCP_REGION || secrets.GCP_REGION }}
+      CLOUD_RUN_SERVICE: ${{ vars.CLOUD_RUN_SERVICE != '' && vars.CLOUD_RUN_SERVICE || secrets.CLOUD_RUN_SERVICE }}
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Validate deployment configuration
+      - name: Resolve deployment configuration
+        id: deploy-config
         run: |
-          test -n "${GCP_PROJECT_ID}" || (echo "Missing repository variable: GCP_PROJECT_ID" && exit 1)
-          test -n "${GCP_REGION}" || (echo "Missing repository variable: GCP_REGION" && exit 1)
-          test -n "${CLOUD_RUN_SERVICE}" || (echo "Missing repository variable: CLOUD_RUN_SERVICE" && exit 1)
-          test -n "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}" || (echo "Missing repository secret: GCP_WORKLOAD_IDENTITY_PROVIDER" && exit 1)
-          test -n "${{ secrets.GCP_SERVICE_ACCOUNT }}" || (echo "Missing repository secret: GCP_SERVICE_ACCOUNT" && exit 1)
+          missing=()
+          test -n "${GCP_PROJECT_ID}" || missing+=("GCP_PROJECT_ID (repository variable or secret)")
+          test -n "${GCP_REGION}" || missing+=("GCP_REGION (repository variable or secret)")
+          test -n "${CLOUD_RUN_SERVICE}" || missing+=("CLOUD_RUN_SERVICE (repository variable or secret)")
+          test -n "${GCP_WORKLOAD_IDENTITY_PROVIDER}" || missing+=("GCP_WORKLOAD_IDENTITY_PROVIDER (repository secret)")
+          test -n "${GCP_SERVICE_ACCOUNT}" || missing+=("GCP_SERVICE_ACCOUNT (repository secret)")
+
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "deploy_ready=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Skipping Cloud Run deployment; missing: ${missing[*]}"
+            exit 0
+          fi
+
+          echo "deploy_ready=true" >> "$GITHUB_OUTPUT"
 
       - name: Authenticate to Google Cloud
+        if: steps.deploy-config.outputs.deploy_ready == 'true'
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
 
       - name: Setup gcloud
+        if: steps.deploy-config.outputs.deploy_ready == 'true'
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
 
       - name: Deploy to Cloud Run
+        if: steps.deploy-config.outputs.deploy_ready == 'true'
         run: |
           gcloud run deploy "${CLOUD_RUN_SERVICE}" \
             --source . \

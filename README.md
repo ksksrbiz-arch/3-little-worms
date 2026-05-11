@@ -33,6 +33,8 @@ This repository is configured to deploy to **Google Cloud Run** from GitHub Acti
 - `GCP_REGION` (example: `us-west2`)
 - `CLOUD_RUN_SERVICE` (Cloud Run service name)
 
+> These can be set as repository variables (recommended) or repository secrets with the same names.
+
 ### Optional GitHub repository variables
 
 - `DEPLOY_BRANCH` (branch name to deploy from; defaults to `main`)
@@ -41,5 +43,7 @@ This repository is configured to deploy to **Google Cloud Run** from GitHub Acti
 
 - `GCP_WORKLOAD_IDENTITY_PROVIDER`
 - `GCP_SERVICE_ACCOUNT`
+
+If required deployment settings are missing, the workflow will skip the Cloud Run deploy step with a warning instead of failing the whole workflow.
 
 No Cloudflare deployment configuration is used by this repository.
