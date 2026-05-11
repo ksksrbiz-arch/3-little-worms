@@ -6,11 +6,13 @@
 import { useGameStore, mobileInputs } from '../store/gameStore';
 import { useUserStore } from '../store/userStore';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ExternalLink, Trophy, ArrowLeft, ArrowRight, Zap, User, Settings, LogOut, ShoppingCart } from 'lucide-react';
+import { ExternalLink, Trophy, ArrowLeft, ArrowRight, Zap, User, Settings, LogOut, ShoppingCart, Sparkles } from 'lucide-react';
 import { useEffect, useState, useRef } from 'react';
 import { db } from '../firebase';
 import { doc, setDoc, serverTimestamp, getDocs, collection, query, orderBy, limit } from 'firebase/firestore';
 import { Shop } from './Shop';
+import { AICreator } from './AICreator';
+import { audioManager } from '../lib/audio';
 
 export function UI() {
   const { gameState, playerId, joinGame } = useGameStore();
@@ -22,6 +24,7 @@ export function UI() {
   const { user, profile, loading, signIn, signOut, updateProfile } = useUserStore();
   const [showSettings, setShowSettings] = useState(false);
   const [showShop, setShowShop] = useState(false);
+  const [showAICreator, setShowAICreator] = useState(false);
   const [globalLeaderboard, setGlobalLeaderboard] = useState<any[]>([]);
   const [localName, setLocalName] = useState('');
   useEffect(() => {
@@ -106,6 +109,7 @@ let leaderboardCache: { data: any[] | null, expires: number } = { data: null, ex
   }, [user, profile]);
 
   const handleJoinGame = () => {
+    audioManager.init();
     if (profile) {
       joinGame({ name: profile.displayName, color: profile.skin === 'default' ? undefined : profile.skin });
     } else {
@@ -190,6 +194,9 @@ let leaderboardCache: { data: any[] | null, expires: number } = { data: null, ex
           
           {user ? (
             <div className="flex items-center gap-2">
+              <button title="AI Studio" onClick={() => setShowAICreator(true)} className="p-2 bg-purple-500/20 hover:bg-purple-500/40 border border-purple-500/50 rounded-full text-purple-400 transition-colors pointer-events-auto shadow-[0_0_15px_rgba(168,85,247,0.2)]">
+                <Sparkles size={20} />
+              </button>
               <button onClick={() => setShowShop(true)} className="p-2 bg-yellow-500/20 hover:bg-yellow-500/40 border border-yellow-500/50 rounded-full text-yellow-400 transition-colors pointer-events-auto shadow-[0_0_15px_rgba(234,179,8,0.2)]">
                 <ShoppingCart size={20} />
               </button>
@@ -222,7 +229,7 @@ let leaderboardCache: { data: any[] | null, expires: number } = { data: null, ex
               <div key={entry.id} className="flex justify-between items-center text-sm">
                 <div className="flex items-center gap-2 truncate">
                   <span className="text-white/40 w-4">{i + 1}.</span>
-                  <span style={{ color: entry.color }} className="font-medium truncate max-w-[120px]">
+                  <span style={{ color: entry.color?.startsWith('data:') ? '#a855f7' : entry.color }} className="font-medium truncate max-w-[120px]">
                     {entry.userId === user?.uid ? 'You' : entry.name}
                   </span>
                 </div>
@@ -239,6 +246,11 @@ let leaderboardCache: { data: any[] | null, expires: number } = { data: null, ex
       {/* Shop Modal */}
       <AnimatePresence>
         {showShop && <Shop onClose={() => setShowShop(false)} />}
+      </AnimatePresence>
+
+      {/* AI Creator Modal */}
+      <AnimatePresence>
+        {showAICreator && <AICreator onClose={() => setShowAICreator(false)} />}
       </AnimatePresence>
 
       {/* Settings Modal */}

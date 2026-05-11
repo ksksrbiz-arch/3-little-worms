@@ -18,6 +18,7 @@ import { Hazards } from './game/Hazards';
 import { localCollectedOrbs } from './game/utils';
 
 import { useUserStore } from '../store/userStore';
+import { audioManager } from '../lib/audio';
 
 const THEMES: Record<string, { bg: string, cell: string, section: string }> = {
   default: { bg: '#0a0a0a', cell: '#1e3a8a', section: '#3b82f6' },
@@ -40,6 +41,7 @@ export function GameScene() {
     score: number;
     currentAngle: number;
     isBoosting: boolean;
+    wasBoosting: boolean;
     lastSendTime: number;
   }>({
     active: false,
@@ -47,6 +49,7 @@ export function GameScene() {
     score: 10,
     currentAngle: 0,
     isBoosting: false,
+    wasBoosting: false,
     lastSendTime: 0,
   });
 
@@ -72,6 +75,7 @@ export function GameScene() {
     window.addEventListener('blur', handleBlur);
 
     return () => {
+      audioManager.stopBoost();
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('blur', handleBlur);
@@ -139,6 +143,7 @@ export function GameScene() {
           localCollectedOrbs.add(orbId);
           delete gs.orbs[orbId]; // predict locally
           sendCollectOrb(orbId);
+          audioManager.playCollect();
           if (navigator.vibrate) navigator.vibrate(10);
         }
       }
@@ -184,14 +189,25 @@ export function GameScene() {
         }
       }
 
+      const isBoostingNow = localPlayerRef.current.isBoosting;
+      const wasBoosting = localPlayerRef.current.wasBoosting;
+      if (isBoostingNow && !wasBoosting) {
+        audioManager.startBoost();
+      } else if (!isBoostingNow && wasBoosting) {
+        audioManager.stopBoost();
+      }
+      localPlayerRef.current.wasBoosting = isBoostingNow;
+
       if (collided) {
+        audioManager.stopBoost();
+        audioManager.playDeath();
         if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
         localPlayerRef.current.active = false;
         sendPlayerState({
           segments: localPlayerRef.current.segments,
           score: localPlayerRef.current.score,
           currentAngle: localPlayerRef.current.currentAngle,
-          isBoosting: localPlayerRef.current.isBoosting,
+          isBoosting: false,
           state: 'dead'
         });
         return;
@@ -237,6 +253,17 @@ export function GameScene() {
   if (!gameState) return null;
 
   const activeTheme = profile?.theme && THEMES[profile.theme] ? THEMES[profile.theme] : THEMES.default;
+  const customBgTexture = useMemo(() => {
+    if (profile?.customBackground && profile.customBackground.startsWith('data:image')) {
+      const loader = new THREE.TextureLoader();
+      const tex = loader.load(profile.customBackground);
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(5, 5); // Tile the texture
+      return tex;
+    }
+    return null;
+  }, [profile?.customBackground]);
 
   return (
     <>
@@ -261,22 +288,24 @@ export function GameScene() {
       {/* Ground plane to receive shadows */}
       <mesh receiveShadow position={[0, 0, -0.2]}>
         <planeGeometry args={[WORLD_SIZE, WORLD_SIZE]} />
-        <meshStandardMaterial color={activeTheme.bg} />
+        <meshStandardMaterial color={customBgTexture ? '#ffffff' : activeTheme.bg} map={customBgTexture || undefined} />
       </mesh>
 
-      <Grid
-        position={[0, 0, -0.1]}
-        rotation={[Math.PI / 2, 0, 0]}
-        args={[WORLD_SIZE, WORLD_SIZE]}
-        cellSize={1}
-        cellThickness={0.5}
-        cellColor={activeTheme.cell}
-        sectionSize={10}
-        sectionThickness={1}
-        sectionColor={activeTheme.section}
-        fadeDistance={100}
-        fadeStrength={1}
-      />
+      {!customBgTexture && (
+        <Grid
+          position={[0, 0, -0.1]}
+          rotation={[Math.PI / 2, 0, 0]}
+          args={[WORLD_SIZE, WORLD_SIZE]}
+          cellSize={1}
+          cellThickness={0.5}
+          cellColor={activeTheme.cell}
+          sectionSize={10}
+          sectionThickness={1}
+          sectionColor={activeTheme.section}
+          fadeDistance={100}
+          fadeStrength={1}
+        />
+      )}
 
       <Orbs />
       <DeathExplosions />

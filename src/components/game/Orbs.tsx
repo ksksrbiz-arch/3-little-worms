@@ -19,6 +19,8 @@ export function Orbs() {
       if (localCollectedOrbs.has(orbId)) continue;
       const orb = gs.orbs[orbId];
       dummy.position.set(orb.x, orb.y, 0.5);
+      const scale = orb.value >= 5 ? 2.5 : 1.0;
+      dummy.scale.setScalar(scale);
       dummy.updateMatrix();
       meshRef.current.setMatrixAt(i, dummy.matrix);
       colorObj.set(orb.color);

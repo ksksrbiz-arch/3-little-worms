@@ -48,7 +48,8 @@ export function Hazards() {
         depthWrite={false}
         onBeforeCompile={(shader) => {
           shader.uniforms.uTime = uniforms.uTime;
-          shader.fragmentShader = `
+          shader.vertexShader = '#define USE_UV\n' + shader.vertexShader;
+          shader.fragmentShader = '#define USE_UV\n' + `
             uniform float uTime;
             ${shader.fragmentShader}
           `.replace(

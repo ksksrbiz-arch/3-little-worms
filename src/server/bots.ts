@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { GameState, WORLD_SIZE, INITIAL_LENGTH, SEGMENT_SPACING, TURN_SPEED, BASE_SPEED, BOOST_SPEED } from '../shared/types';
+import { SpatialHash } from './SpatialHash';
 
 const COLORS = [
   '#ff7eb3', '#ffb86c', '#f1fa8c', '#50fa7b', '#8be9fd', '#bd93f9',
@@ -16,14 +17,35 @@ const TARGET_BOTS = 15;
 
 export function updateBots(state: GameState, delta: number, spawnOrb: (x: number, y: number, v: number, c: string, f: boolean) => void) {
   let aliveBots = 0;
+  
+  // Build spatial hashes for this tick
+  const cellGridSize = 20; // 20 units per cell
+  const playerHash = new SpatialHash<{id: string, score: number, segments: {x:number, y:number}[]}>(cellGridSize);
+  const segmentHash = new SpatialHash<{id: string, x: number, y: number}>(5); // Fine grid for collision (1.5 radius)
+  const orbHash = new SpatialHash<{id: string, x: number, y: number}>(cellGridSize);
+  
   for (const id in state.players) {
-    if (state.players[id].isBot && state.players[id].state === 'alive') {
-      aliveBots++;
+    const p = state.players[id];
+    if (p.state === 'alive' && p.segments.length > 0) {
+      if (p.isBot) aliveBots++;
+      
+      const head = p.segments[0];
+      playerHash.insert(head.x, head.y, { id, score: p.score, segments: p.segments });
+      
+      for (const seg of p.segments) {
+        segmentHash.insert(seg.x, seg.y, { id, x: seg.x, y: seg.y });
+      }
     }
+  }
+  
+  for (const orbId in state.orbs) {
+    const orb = state.orbs[orbId];
+    orbHash.insert(orb.x, orb.y, { id: orbId, x: orb.x, y: orb.y });
   }
 
   // Spawn bots
   if (aliveBots < TARGET_BOTS && Math.random() < 0.1) {
+
     const id = 'bot-' + uuidv4();
     const angle = Math.random() * Math.PI * 2;
     const startX = (Math.random() - 0.5) * (WORLD_SIZE - 20);
@@ -57,6 +79,10 @@ export function updateBots(state: GameState, delta: number, spawnOrb: (x: number
     const botPlayer = state.players[id];
     if (!botPlayer || botPlayer.state !== 'alive') {
       delete botsAI[id];
+      if (botPlayer) {
+          // Keep it to emit 'dead' state once, but delay full deletion
+          setTimeout(() => { delete state.players[id]; }, 100);
+      }
       continue;
     }
     
@@ -74,10 +100,9 @@ export function updateBots(state: GameState, delta: number, spawnOrb: (x: number
       let closestThreatId = null;
       let closestPreyId = null;
 
-      for (const pId in state.players) {
-          if (pId === id) continue;
-          const p = state.players[pId];
-          if (p.state !== 'alive' || p.segments.length === 0) continue;
+      const nearbyPlayers = playerHash.query(head.x, head.y, 30);
+      for (const p of nearbyPlayers) {
+          if (p.id === id) continue;
           
           const dx = p.segments[0].x - head.x;
           const dy = p.segments[0].y - head.y;
@@ -87,12 +112,12 @@ export function updateBots(state: GameState, delta: number, spawnOrb: (x: number
               if (p.score > botPlayer.score + 5) {
                   if (distSq < closestThreatSq) {
                       closestThreatSq = distSq;
-                      closestThreatId = pId;
+                      closestThreatId = p.id;
                   }
               } else if (p.score < botPlayer.score - 5) {
                   if (distSq < closestPreySq) {
                       closestPreySq = distSq;
-                      closestPreyId = pId;
+                      closestPreyId = p.id;
                   }
               }
           }
@@ -101,25 +126,33 @@ export function updateBots(state: GameState, delta: number, spawnOrb: (x: number
       if (closestThreatId) {
           ai.targetId = closestThreatId;
           ai.targetType = 'flee';
-          if (Math.random() < 0.5) botPlayer.isBoosting = true;
       } else if (closestPreyId) {
           ai.targetId = closestPreyId;
           ai.targetType = 'attack';
-          if (Math.random() < 0.3) botPlayer.isBoosting = true;
       } else {
           // Pick closest orb
           let closestOrbSq = Infinity;
           let closestOrbId = null;
-          for (const orbId in state.orbs) {
-              const orb = state.orbs[orbId];
+          const nearbyOrbs = orbHash.query(head.x, head.y, 50); // Search 50 units for orbs
+          
+          for (const orb of nearbyOrbs) {
               const dx = orb.x - head.x;
               const dy = orb.y - head.y;
               const distSq = dx*dx + dy*dy;
               if (distSq < closestOrbSq) {
                   closestOrbSq = distSq;
-                  closestOrbId = orbId;
+                  closestOrbId = orb.id;
               }
           }
+          // Fallback if no nearby orbs
+          if (!closestOrbId) {
+             const allOrbs = Object.values(state.orbs);
+             if (allOrbs.length > 0) {
+                 const randOrb = allOrbs[Math.floor(Math.random() * allOrbs.length)];
+                 closestOrbId = randOrb.id;
+             }
+          }
+
           if (closestOrbId) {
              ai.targetId = closestOrbId;
              ai.targetType = 'orb';
@@ -168,32 +201,62 @@ export function updateBots(state: GameState, delta: number, spawnOrb: (x: number
       }
     }
 
-    // Obstacle avoidance (simple push away)
+    // Hazard avoidance
     let avoidAngle = 0;
-    let avoidStength = 0;
+    let avoidStrength = 0;
+    let avoidingHazard = false;
     for (const hId in state.hazards) {
         const haz = state.hazards[hId];
         const dx = head.x - haz.x;
         const dy = head.y - haz.y;
         const dist = Math.sqrt(dx*dx + dy*dy);
-        if (dist < haz.radius + 5) {
+        if (dist < haz.radius + 10) {
              avoidAngle = Math.atan2(dy, dx);
-             avoidStength = 1;
+             avoidStrength = 1;
+             avoidingHazard = true;
         }
     }
-    if (avoidStength > 0) {
+    if (avoidStrength > 0) {
        // Steer towards avoidAngle
        let diff = avoidAngle - botPlayer.currentAngle;
        while (diff > Math.PI) diff -= Math.PI * 2;
        while (diff < -Math.PI) diff += Math.PI * 2;
-       botPlayer.currentAngle += Math.sign(diff) * TURN_SPEED * delta;
+       botPlayer.currentAngle += Math.sign(diff) * TURN_SPEED * 2 * delta;
     }
 
 
     // Move bot
-    // Random boost if high score
-    if (botPlayer.score > 20 && Math.random() < 0.01) botPlayer.isBoosting = true;
-    if (botPlayer.score <= 12 || Math.random() < 0.05) botPlayer.isBoosting = false;
+    // Sophisticated boosting logic
+    let shouldBoost = false;
+    
+    // 0. Hazard avoidance boost
+    if (avoidingHazard && botPlayer.score > 15) {
+        shouldBoost = true;
+    }
+    // 1. If chasing prey, boost to catch up!
+    else if (ai.targetType === 'attack' && hasTarget && botPlayer.score > 20) {
+        shouldBoost = true;
+    }
+    // 2. If fleeing a threat, definitely boost!
+    else if (ai.targetType === 'flee' && hasTarget && botPlayer.score > 15) {
+        shouldBoost = true;
+    }
+    // 3. Keep current boosting state for random bursts
+    else if (ai.targetType === 'orb') {
+       if (botPlayer.score > 40 && Math.random() < 0.02) {
+           botPlayer.isBoosting = true;
+       }
+       if (Math.random() < 0.05) {
+           botPlayer.isBoosting = false;
+       }
+       shouldBoost = botPlayer.isBoosting;
+    }
+
+    if (botPlayer.score <= 15) {
+        shouldBoost = false;
+    }
+
+    botPlayer.isBoosting = shouldBoost;
 
     const speed = botPlayer.isBoosting ? BOOST_SPEED : BASE_SPEED;
     const newHead = { ...head };
@@ -223,32 +286,30 @@ export function updateBots(state: GameState, delta: number, spawnOrb: (x: number
     }
 
     // Bot Collection of Orbs
-    for (const orbId in state.orbs) {
-      const orb = state.orbs[orbId];
-      const dx = newHead.x - orb.x;
-      const dy = newHead.y - orb.y;
-      if (dx*dx + dy*dy < 4) {
-          botPlayer.score += orb.value;
-          delete state.orbs[orbId];
+    const nearbyOrbsColl = orbHash.query(newHead.x, newHead.y, 2);
+    for (const orb of nearbyOrbsColl) {
+      if (state.orbs[orb.id]) {
+        const dx = newHead.x - orb.x;
+        const dy = newHead.y - orb.y;
+        if (dx*dx + dy*dy < 4) {
+            botPlayer.score += state.orbs[orb.id].value;
+            delete state.orbs[orb.id];
+        }
       }
     }
 
     // Bot Collision Check
     let collided = false;
     // 1. Players
-    for (const otherId in state.players) {
-       if (otherId === id) continue;
-       const other = state.players[otherId];
-       if (other.state !== 'alive') continue;
-       for (const seg of other.segments) {
-           const dx = newHead.x - seg.x;
-           const dy = newHead.y - seg.y;
-           if (dx*dx+dy*dy < 2.25) {
-               collided = true;
-               break;
-           }
+    const nearbySegments = segmentHash.query(newHead.x, newHead.y, 2);
+    for (const seg of nearbySegments) {
+       if (seg.id === id) continue; // Ignore self
+       const dx = newHead.x - seg.x;
+       const dy = newHead.y - seg.y;
+       if (dx*dx+dy*dy < 2.25) {
+           collided = true;
+           break;
        }
-       if (collided) break;
     }
     // 3. Hazards
     if (!collided) {

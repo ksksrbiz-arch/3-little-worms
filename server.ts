@@ -62,9 +62,12 @@ const state: GameState = {
   hazards: {},
 };
 
-function spawnOrb(x?: number, y?: number, value = 1, color?: string, force = false) {
+function spawnOrb(x?: number, y?: number, value?: number, color?: string, force = false) {
   if (!force && Object.keys(state.orbs).length >= MAX_ORBS) return;
   const id = uuidv4();
+  if (value === undefined) {
+    value = Math.random() < 0.1 ? 5 : 1; // 10% chance to be large orb
+  }
   state.orbs[id] = {
     id,
     x: x ?? (Math.random() - 0.5) * WORLD_SIZE,

@@ -11,6 +11,7 @@ interface UserProfile {
   theme: string;
   coins?: number;
   ownedSkins?: string[];
+  customBackground?: string;
 }
 
 interface UserStore {

@@ -10,16 +10,29 @@ export function Snake({ playerId, color, isLocal }: { playerId: string, color: s
   const particlesRef = useRef<THREE.InstancedMesh>(null);
 
   const getSkinProperties = (c: string) => {
+    if (c.startsWith('data:image')) {
+      return { color: '#ffffff', roughness: 0.2, metalness: 0.2, isRainbow: false, isCustom: true, customUrl: c };
+    }
     switch (c) {
-      case 'rainbow': return { color: '#ffffff', roughness: 0.1, metalness: 0.1, isRainbow: true };
-      case 'chrome': return { color: '#ffffff', roughness: 0.0, metalness: 1.0, isRainbow: false };
-      case 'neon': return { color: '#39ff14', roughness: 0.2, metalness: 0.8, isRainbow: false }; // green neon
-      default: return { color: c, roughness: 0.2, metalness: 0.8, isRainbow: false }; 
+      case 'rainbow': return { color: '#ffffff', roughness: 0.1, metalness: 0.1, isRainbow: true, isCustom: false };
+      case 'chrome': return { color: '#ffffff', roughness: 0.0, metalness: 1.0, isRainbow: false, isCustom: false };
+      case 'neon': return { color: '#39ff14', roughness: 0.2, metalness: 0.8, isRainbow: false, isCustom: false }; // green neon
+      default: return { color: c, roughness: 0.2, metalness: 0.8, isRainbow: false, isCustom: false }; 
     }
   };
   
   const skin = useMemo(() => getSkinProperties(color), [color]);
   const baseColorObj = useMemo(() => new THREE.Color(skin.color), [skin.color]);
+  const customTexture = useMemo(() => {
+    if (skin.isCustom && skin.customUrl) {
+       const loader = new THREE.TextureLoader();
+       const tex = loader.load(skin.customUrl);
+       tex.wrapS = THREE.RepeatWrapping;
+       tex.wrapT = THREE.RepeatWrapping;
+       return tex;
+    }
+    return null;
+  }, [skin.customUrl]);
   
   const dummy = useMemo(() => new THREE.Object3D(), []);
   const currentPositions = useRef<{x: number, y: number}[]>([]);
@@ -157,11 +170,12 @@ export function Snake({ playerId, color, isLocal }: { playerId: string, color: s
     }
   });
 
-  const shaderSetup = (shader: THREE.Shader) => {
+  const shaderSetup = (shader: any) => {
     shader.uniforms.uBoost = uniforms.uBoost;
     shader.uniforms.uTime = uniforms.uTime;
     shader.uniforms.uIsRainbow = { value: skin.isRainbow };
-    shader.fragmentShader = `
+    shader.vertexShader = '#define USE_UV\n' + shader.vertexShader;
+    shader.fragmentShader = '#define USE_UV\n' + `
       uniform float uBoost;
       uniform float uTime;
       uniform bool uIsRainbow;
@@ -192,6 +206,7 @@ export function Snake({ playerId, color, isLocal }: { playerId: string, color: s
       <Sphere ref={headRef} castShadow receiveShadow args={[0.8, 16, 16]}>
         <meshStandardMaterial
           color={skin.color}
+          map={customTexture || undefined}
           roughness={skin.roughness}
           metalness={skin.metalness}
           toneMapped={false}
@@ -202,6 +217,7 @@ export function Snake({ playerId, color, isLocal }: { playerId: string, color: s
         <sphereGeometry args={[0.6, 16, 16]} />
         <meshStandardMaterial
           color={skin.color}
+          map={customTexture || undefined}
           roughness={skin.roughness}
           metalness={skin.metalness}
           toneMapped={false}
