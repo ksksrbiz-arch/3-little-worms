@@ -3,7 +3,7 @@ import { auth, db } from '../firebase';
 import { onAuthStateChanged, signInWithPopup, signOut as fbSignOut, User } from 'firebase/auth';
 import { googleProvider } from '../firebase';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { getCached, setCached } from '../lib/dynamicCache';
+import { getCached, invalidateCached } from '../lib/dynamicCache';
 
 const PROFILE_CACHE_TTL_MS = 60_000;
 
@@ -74,7 +74,7 @@ export const useUserStore = create<UserStore>((set, get) => ({
       ...newProfile,
       updatedAt: serverTimestamp(),
     }, { merge: true });
-    setCached(`profile:${user.uid}`, { exists: () => true, data: () => newProfile }, PROFILE_CACHE_TTL_MS);
+    invalidateCached(`profile:${user.uid}`);
     set({ profile: newProfile });
   }
 }));
