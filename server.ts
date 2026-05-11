@@ -46,7 +46,13 @@ const io = new Server(httpServer, {
   },
 });
 
-const PORT = 3000;
+function getPort(value: string | undefined) {
+  if (!value || !/^\d+$/.test(value)) return 3000;
+  const port = Number(value);
+  return port > 0 && port <= 65535 ? port : 3000;
+}
+
+const PORT = getPort(process.env.PORT);
 const GCLOUD_DEPLOY_URL =
   process.env.GCLOUD_DEPLOY_URL || 'https://service-3-little-worms-167345356687.us-west2.run.app';
 const APP_URL =
