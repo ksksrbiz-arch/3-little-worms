@@ -47,7 +47,7 @@ const io = new Server(httpServer, {
 });
 
 const PORT = 3000;
-const GCLOUD_DEPLOY_URL = 'https://ais-dev-sycqofecbkeaxlxnkvun6l-104425727067.us-east5.run.app';
+const GCLOUD_DEPLOY_URL = 'https://service-3-little-worms-167345356687.us-west2.run.app';
 const APP_URL =
   process.env.APP_URL ||
   (process.env.NODE_ENV === 'production' ? GCLOUD_DEPLOY_URL : `http://localhost:${PORT}`);
