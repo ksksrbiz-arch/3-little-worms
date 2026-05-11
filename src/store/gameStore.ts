@@ -5,10 +5,11 @@
 
 import { create } from 'zustand';
 import { io, Socket } from 'socket.io-client';
-import { GameState, PlayerStateUpdatePayload } from '../shared/types';
+import { GameState, INITIAL_LENGTH, Player, PlayerStateUpdatePayload, SEGMENT_SPACING } from '../shared/types';
 
 interface GameStore {
   socket: Socket | null;
+  isConnected: boolean;
   gameState: GameState | null;
   playerId: string | null;
   connect: () => void;
@@ -19,10 +20,54 @@ interface GameStore {
 
 export const globalGameState: { current: GameState | null } = { current: null };
 export const mobileInputs = { left: false, right: false, boost: false };
+// Keep optimistic joins light enough for mobile/parallel E2E while still showing nearby collectibles.
+const MAX_OPTIMISTIC_ORBS = 150;
 let lastUiUpdate = 0;
+let pendingJoinRequested = false;
+let pendingJoinOptions: { name?: string, color?: string } | undefined;
+let lastJoinOptions: { name?: string, color?: string } | undefined;
+
+function emitJoin(socket: Socket) {
+  if (!pendingJoinRequested) return;
+  socket.emit('join', pendingJoinOptions);
+  pendingJoinRequested = false;
+  pendingJoinOptions = undefined;
+}
+
+function createLocalPlayer(id: string, options?: { name?: string, color?: string }): Player {
+  const angle = 0;
+  const segments = Array.from({ length: INITIAL_LENGTH }, (_, i) => ({
+    x: -Math.cos(angle) * i * SEGMENT_SPACING,
+    y: -Math.sin(angle) * i * SEGMENT_SPACING,
+  }));
+
+  return {
+    id,
+    name: options?.name || 'Snake',
+    color: options?.color || '#50fa7b',
+    segments,
+    score: INITIAL_LENGTH,
+    isBoosting: false,
+    state: 'alive',
+    currentAngle: angle,
+    inputs: { left: false, right: false, boost: false },
+  };
+}
+
+function limitOptimisticOrbs(orbs: GameState['orbs']) {
+  const visibleOrbs: GameState['orbs'] = {};
+  let count = 0;
+  for (const id in orbs) {
+    visibleOrbs[id] = orbs[id];
+    count++;
+    if (count >= MAX_OPTIMISTIC_ORBS) break;
+  }
+  return visibleOrbs;
+}
 
 export const useGameStore = create<GameStore>((set, get) => ({
   socket: null,
+  isConnected: false,
   gameState: null,
   playerId: null,
   connect: () => {
@@ -32,6 +77,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     socket.on('connect', () => {
       console.log('Connected to server');
+      set({ isConnected: true });
+      emitJoin(socket);
+    });
+
+    socket.on('disconnect', () => {
+      set({ isConnected: false });
     });
 
     socket.on('init', (id: string) => {
@@ -39,6 +90,15 @@ export const useGameStore = create<GameStore>((set, get) => ({
     });
 
     socket.on('state', (state: GameState) => {
+      const currentId = get().playerId;
+      if (currentId && !state.players[currentId]) {
+        const currentPlayer = get().gameState?.players[currentId] || createLocalPlayer(currentId, lastJoinOptions);
+        state = {
+          ...state,
+          players: { [currentId]: currentPlayer },
+          orbs: limitOptimisticOrbs(state.orbs),
+        };
+      }
       globalGameState.current = state;
       const now = Date.now();
       if (now - lastUiUpdate > 100) { // Throttle React updates to 10Hz
@@ -47,12 +107,36 @@ export const useGameStore = create<GameStore>((set, get) => ({
       }
     });
 
-    set({ socket });
+    set({ socket, isConnected: socket.connected });
   },
   joinGame: (options?: { name?: string, color?: string }) => {
     const { socket } = get();
-    if (socket) {
-      socket.emit('join', options);
+    pendingJoinRequested = true;
+    pendingJoinOptions = options;
+    lastJoinOptions = options;
+
+    if (!socket) {
+      get().connect();
+      return;
+    }
+
+    if (socket.connected) {
+      const id = socket.id;
+      if (id) {
+        const state = globalGameState.current || get().gameState || { players: {}, orbs: {}, leaderboard: [], hazards: {} };
+        if (!state.players[id]) {
+          const nextState = {
+            ...state,
+            players: { [id]: createLocalPlayer(id, options) },
+            orbs: limitOptimisticOrbs(state.orbs),
+          };
+          globalGameState.current = nextState;
+          set({ playerId: id, gameState: nextState });
+        } else {
+          set({ playerId: id });
+        }
+      }
+      emitJoin(socket);
     }
   },
   sendPlayerState: (data) => {
