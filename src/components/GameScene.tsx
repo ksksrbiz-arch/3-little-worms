@@ -26,6 +26,7 @@ const MAX_FRAME_DELTA = 1 / 30;
 const ORB_COLLECT_RADIUS_SQ = 4;
 const PLAYER_COLLISION_RADIUS_SQ = 2.25;
 const MIN_LENGTH = 10;
+const HAZARD_COLLISION_PADDING = 0.8;
 
 const THEMES: Record<string, { bg: string, cell: string, section: string }> = {
   default: { bg: '#0a0a0a', cell: '#1e3a8a', section: '#3b82f6' },
@@ -41,8 +42,10 @@ function distanceSquared(a: Point, b: Point) {
 }
 
 function clampToBoundary(point: Point, boundary: number) {
-  point.x = Math.max(-boundary, Math.min(boundary, point.x));
-  point.y = Math.max(-boundary, Math.min(boundary, point.y));
+  return {
+    x: Math.max(-boundary, Math.min(boundary, point.x)),
+    y: Math.max(-boundary, Math.min(boundary, point.y)),
+  };
 }
 
 function createPlayerStatePayload(
@@ -150,7 +153,9 @@ export function GameScene() {
       head.x += Math.cos(localPlayerRef.current.currentAngle) * speed * delta;
       head.y += Math.sin(localPlayerRef.current.currentAngle) * speed * delta;
 
-      clampToBoundary(head, WORLD_SIZE / 2);
+      const boundedHead = clampToBoundary(head, WORLD_SIZE / 2);
+      head.x = boundedHead.x;
+      head.y = boundedHead.y;
 
       localPlayerRef.current.segments.unshift(head);
 
@@ -207,9 +212,8 @@ export function GameScene() {
         for (const hazId in gs.hazards) {
           const haz = gs.hazards[hazId];
           if (haz.state === 'active') {
-            const dx = head.x - haz.x;
-            const dy = head.y - haz.y;
-            if (dx * dx + dy * dy < (haz.radius + 0.8) * (haz.radius + 0.8)) {
+            const hazardCollisionRadius = haz.radius + HAZARD_COLLISION_PADDING;
+            if (distanceSquared(head, haz) < hazardCollisionRadius * hazardCollisionRadius) {
               localPlayerRef.current.score -= 20 * delta;
               if (localPlayerRef.current.score <= MIN_LENGTH) {
                 collided = true;
