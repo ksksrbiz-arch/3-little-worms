@@ -76,8 +76,17 @@ const state: GameState = {
   hazards: {},
 };
 
+// Hard upper bound on total orbs in the world. Death drops are spawned with
+// force=true (bypassing MAX_ORBS), and with many simultaneous bot/player
+// deaths the count can grow without bound, ballooning network payloads and
+// overflowing the client's pre-allocated InstancedMesh buffer, which kills
+// the WebGL render loop and freezes the game.
+const HARD_ORB_LIMIT = 1000;
+
 function spawnOrb(x?: number, y?: number, value?: number, color?: string, force = false) {
-  if (!force && Object.keys(state.orbs).length >= MAX_ORBS) return;
+  const total = Object.keys(state.orbs).length;
+  if (total >= HARD_ORB_LIMIT) return;
+  if (!force && total >= MAX_ORBS) return;
   const id = uuidv4();
   if (value === undefined) {
     value = Math.random() < 0.1 ? 5 : 1; // 10% chance to be large orb

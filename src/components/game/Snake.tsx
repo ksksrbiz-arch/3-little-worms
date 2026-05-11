@@ -5,6 +5,11 @@ import * as THREE from 'three';
 import { globalGameState } from '../../store/gameStore';
 import { getCachedTexture } from '../../lib/textureCache';
 
+// Pre-allocated capacity of the body InstancedMesh. The render loop must never
+// write past this many body segments or Three.js will throw a range error and
+// kill the WebGL render loop, freezing the game.
+const MAX_BODY_INSTANCES = 2000;
+
 export const Snake = React.memo(function Snake({ playerId, color, isLocal, name }: { playerId: string, color: string, isLocal: boolean, name?: string }) {
   const bodyRef = useRef<THREE.InstancedMesh>(null);
   const headRef = useRef<THREE.Mesh>(null);
@@ -64,7 +69,9 @@ export const Snake = React.memo(function Snake({ playerId, color, isLocal, name 
     }
     
     headRef.current.visible = true;
-    const count = player.segments.length;
+    // Cap rendered segments to the head + body instance capacity so we never
+    // call setMatrixAt past the pre-allocated buffer length.
+    const count = Math.min(player.segments.length, MAX_BODY_INSTANCES + 1);
     bodyRef.current.count = Math.max(0, count - 1);
     
     while (currentPositions.current.length < count) {
@@ -213,7 +220,7 @@ export const Snake = React.memo(function Snake({ playerId, color, isLocal, name 
           onBeforeCompile={shaderSetup}
         />
       </Sphere>
-      <instancedMesh ref={bodyRef} args={[null as any, null as any, 2000]} castShadow receiveShadow frustumCulled={false}>
+      <instancedMesh ref={bodyRef} args={[null as any, null as any, MAX_BODY_INSTANCES]} castShadow receiveShadow frustumCulled={false}>
         <sphereGeometry args={[0.6, 16, 16]} />
         <meshStandardMaterial
           color={skin.color}
