@@ -12,6 +12,7 @@ import type {
   GameState,
   Player,
   Orb,
+  PlayerStateUpdatePayload,
 } from './src/shared/types.ts';
 import {
   WORLD_SIZE,
@@ -130,7 +131,7 @@ io.on('connection', (socket) => {
     socket.emit('init', socket.id);
   });
 
-  socket.on('update_state', (data: { segments: any[], score: number, currentAngle: number, isBoosting: boolean, state: string }) => {
+  socket.on('update_state', (data: PlayerStateUpdatePayload) => {
     const player = state.players[socket.id];
     if (player && player.state === 'alive') {
       player.segments = data.segments;

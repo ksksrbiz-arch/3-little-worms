@@ -21,17 +21,30 @@ export type HazardZone = {
 
 export type PlayerState = 'alive' | 'dead' | 'spectating';
 
+export type Point = {
+  x: number;
+  y: number;
+};
+
 export type Player = {
   id: string;
   name: string;
   color: string;
-  segments: { x: number; y: number }[];
+  segments: Point[];
   score: number;
   isBoosting: boolean;
   state: PlayerState;
   currentAngle: number;
   inputs: { left: boolean; right: boolean; boost: boolean };
   isBot?: boolean;
+};
+
+export type PlayerStateUpdatePayload = {
+  segments: Point[];
+  score: number;
+  currentAngle: number;
+  isBoosting: boolean;
+  state: Extract<PlayerState, 'alive' | 'dead'>;
 };
 
 export type Orb = {

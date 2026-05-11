@@ -5,7 +5,7 @@
 
 import { create } from 'zustand';
 import { io, Socket } from 'socket.io-client';
-import { GameState, Player } from '../shared/types';
+import { GameState, PlayerStateUpdatePayload } from '../shared/types';
 
 interface GameStore {
   socket: Socket | null;
@@ -13,7 +13,7 @@ interface GameStore {
   playerId: string | null;
   connect: () => void;
   joinGame: (options?: { name?: string, color?: string }) => void;
-  sendPlayerState: (data: any) => void;
+  sendPlayerState: (data: PlayerStateUpdatePayload) => void;
   sendCollectOrb: (orbId: string) => void;
 }
 
