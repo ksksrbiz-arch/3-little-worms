@@ -6,6 +6,9 @@ on:
       - '**'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: deploy-${{ github.ref }}
   cancel-in-progress: true
@@ -41,8 +44,8 @@ jobs:
       id-token: write
     env:
       GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
-      GCP_REGION: ${{ vars.GCP_REGION || 'us-west2' }}
-      CLOUD_RUN_SERVICE: ${{ vars.CLOUD_RUN_SERVICE || 'service-3-little-worms-167345356687' }}
+      GCP_REGION: ${{ vars.GCP_REGION }}
+      CLOUD_RUN_SERVICE: ${{ vars.CLOUD_RUN_SERVICE }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
