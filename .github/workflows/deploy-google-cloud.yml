@@ -64,8 +64,9 @@ jobs:
           test -n "${GCP_SERVICE_ACCOUNT}" || missing+=("GCP_SERVICE_ACCOUNT (repository secret)")
 
           if [ "${#missing[@]}" -gt 0 ]; then
+            missing_list="$(IFS=', '; echo "${missing[*]}")"
             echo "deploy_ready=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::Skipping Cloud Run deployment; missing: ${missing[*]}"
+            echo "::warning::Skipping Cloud Run deployment; missing: ${missing_list}"
             exit 0
           fi
 
