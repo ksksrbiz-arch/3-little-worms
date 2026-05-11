@@ -21,6 +21,6 @@ COPY --from=build /app/server.ts ./server.ts
 COPY --from=build /app/src/server ./src/server
 COPY --from=build /app/src/shared ./src/shared
 
-EXPOSE 3000
+EXPOSE 8080
 
 CMD ["npm", "start"]
