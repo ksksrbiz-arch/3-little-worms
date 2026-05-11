@@ -9,6 +9,7 @@ import { GameState, Player } from '../shared/types';
 
 interface GameStore {
   socket: Socket | null;
+  isConnected: boolean;
   gameState: GameState | null;
   playerId: string | null;
   connect: () => void;
@@ -20,9 +21,19 @@ interface GameStore {
 export const globalGameState: { current: GameState | null } = { current: null };
 export const mobileInputs = { left: false, right: false, boost: false };
 let lastUiUpdate = 0;
+let pendingJoinRequested = false;
+let pendingJoinOptions: { name?: string, color?: string } | undefined;
+
+function emitJoin(socket: Socket) {
+  if (!pendingJoinRequested) return;
+  socket.emit('join', pendingJoinOptions);
+  pendingJoinRequested = false;
+  pendingJoinOptions = undefined;
+}
 
 export const useGameStore = create<GameStore>((set, get) => ({
   socket: null,
+  isConnected: false,
   gameState: null,
   playerId: null,
   connect: () => {
@@ -32,6 +43,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     socket.on('connect', () => {
       console.log('Connected to server');
+      set({ isConnected: true });
+      emitJoin(socket);
+    });
+
+    socket.on('disconnect', () => {
+      set({ isConnected: false });
     });
 
     socket.on('init', (id: string) => {
@@ -47,12 +64,20 @@ export const useGameStore = create<GameStore>((set, get) => ({
       }
     });
 
-    set({ socket });
+    set({ socket, isConnected: socket.connected });
   },
   joinGame: (options?: { name?: string, color?: string }) => {
     const { socket } = get();
-    if (socket) {
-      socket.emit('join', options);
+    pendingJoinRequested = true;
+    pendingJoinOptions = options;
+
+    if (!socket) {
+      get().connect();
+      return;
+    }
+
+    if (socket.connected) {
+      emitJoin(socket);
     }
   },
   sendPlayerState: (data) => {

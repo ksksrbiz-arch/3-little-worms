@@ -15,7 +15,7 @@ import { AICreator } from './AICreator';
 import { audioManager } from '../lib/audio';
 
 export function UI() {
-  const { gameState, playerId, joinGame } = useGameStore();
+  const { gameState, playerId, isConnected, joinGame } = useGameStore();
 
   const player = playerId && gameState ? gameState.players[playerId] : null;
   const isAlive = player?.state === 'alive';
@@ -330,7 +330,8 @@ let leaderboardCache: { data: any[] | null, expires: number } = { data: null, ex
 
             <button
               onClick={handleJoinGame}
-              className="w-full py-4 bg-white text-black font-bold rounded-xl hover:bg-gray-200 transition-colors active:scale-95 text-xl select-none"
+              disabled={!isConnected}
+              className="w-full py-4 bg-white text-black font-bold rounded-xl hover:bg-gray-200 transition-colors active:scale-95 text-xl select-none disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100"
             >
               {isDead ? 'RESPAWN' : 'PLAY'}
             </button>
