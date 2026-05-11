@@ -21,6 +21,7 @@ import { useUserStore } from '../store/userStore';
 import { audioManager } from '../lib/audio';
 import { getCachedTexture } from '../lib/textureCache';
 
+// Clamp long frames so gameplay stays responsive without huge one-frame jumps after hitches.
 const MAX_FRAME_DELTA = 1 / 30;
 const ORB_COLLECT_RADIUS_SQ = 4;
 const PLAYER_COLLISION_RADIUS_SQ = 2.25;
