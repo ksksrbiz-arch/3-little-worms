@@ -1,0 +1,42 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User account information and customization settings",
+      "type": "object",
+      "properties": {
+        "displayName": { "type": "string", "description": "Display name of the user" },
+        "avatarUrl": { "type": "string", "description": "URL to the user's avatar" },
+        "skin": { "type": "string", "description": "Selected snake skin" },
+        "theme": { "type": "string", "description": "Selected background theme" },
+        "createdAt": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" }
+      },
+      "required": ["displayName", "avatarUrl", "skin", "theme", "createdAt", "updatedAt"]
+    },
+    "ScoreRecord": {
+      "title": "Score Record",
+      "description": "A leaderboard entry for a user",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "score": { "type": "number" },
+        "timePlayed": { "type": "number" },
+        "name": { "type": "string" },
+        "color": { "type": "string" },
+        "createdAt": { "type": "timestamp" }
+      },
+      "required": ["userId", "score", "timePlayed", "name", "color", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profiles"
+    },
+    "/leaderboard/{scoreId}": {
+      "schema": { "$ref": "#/entities/ScoreRecord" },
+      "description": "Leaderboard scores"
+    }
+  }
+}
