@@ -46,7 +46,8 @@ const io = new Server(httpServer, {
   },
 });
 
-const PORT = Number(process.env.PORT) || 3000;
+const configuredPort = Number(process.env.PORT);
+const PORT = Number.isInteger(configuredPort) && configuredPort > 0 ? configuredPort : 3000;
 const GCLOUD_DEPLOY_URL =
   process.env.GCLOUD_DEPLOY_URL || 'https://service-3-little-worms-167345356687.us-west2.run.app';
 const APP_URL =
