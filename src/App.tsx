@@ -3,12 +3,24 @@
  * SPDX-License-Identifier: Apache-2.0
 */
 
-import { useEffect } from 'react';
+import { Suspense, lazy, useEffect } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import { GameScene } from './components/GameScene';
 import { useGameStore } from './store/gameStore';
-import { UI } from './components/UI';
+
+const UI = lazy(() => import('./components/UI').then((module) => ({ default: module.UI })));
+
+function LoadingOverlay() {
+  return (
+    <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm pointer-events-none">
+      <div className="flex flex-col items-center gap-4 text-white">
+        <div className="h-14 w-14 rounded-full border-4 border-white/20 border-t-cyan-300 animate-spin shadow-[0_0_25px_rgba(34,211,238,0.8)]" />
+        <div className="text-sm font-mono tracking-[0.35em] text-cyan-100 animate-pulse">LOADING</div>
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
   const { connect } = useGameStore();
@@ -24,6 +36,7 @@ export default function App() {
         camera={{ position: [0, 0, 50], fov: 60 }}
         dpr={[1, 1.5]}
         gl={{ antialias: false, powerPreference: "high-performance" }}
+        performance={{ min: 0.6 }}
       >
         <color attach="background" args={['#050505']} />
         <GameScene />
@@ -35,7 +48,9 @@ export default function App() {
           />
         </EffectComposer>
       </Canvas>
-      <UI />
+      <Suspense fallback={<LoadingOverlay />}>
+        <UI />
+      </Suspense>
     </div>
   );
 }

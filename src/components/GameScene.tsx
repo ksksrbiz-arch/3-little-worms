@@ -19,6 +19,10 @@ import { localCollectedOrbs } from './game/utils';
 
 import { useUserStore } from '../store/userStore';
 import { audioManager } from '../lib/audio';
+import { getCachedTexture } from '../lib/textureCache';
+
+const TARGET_FRAME_TIME = 1 / 60;
+const MAX_FRAME_DELTA = 1 / 30;
 
 const THEMES: Record<string, { bg: string, cell: string, section: string }> = {
   default: { bg: '#0a0a0a', cell: '#1e3a8a', section: '#3b82f6' },
@@ -33,6 +37,7 @@ export function GameScene() {
   const { camera } = useThree();
   const inputs = useRef({ left: false, right: false, boost: false });
   const lightRef = useRef<THREE.DirectionalLight>(null);
+  const frameAccumulator = useRef(0);
   const [lightTarget] = useState(() => new THREE.Object3D());
 
   const localPlayerRef = useRef<{
@@ -82,7 +87,12 @@ export function GameScene() {
     };
   }, []);
 
-  useFrame((state, delta) => {
+  useFrame((state, rawDelta) => {
+    frameAccumulator.current = Math.min(frameAccumulator.current + rawDelta, MAX_FRAME_DELTA);
+    if (frameAccumulator.current < TARGET_FRAME_TIME) return;
+    const delta = TARGET_FRAME_TIME;
+    frameAccumulator.current = Math.max(0, frameAccumulator.current - TARGET_FRAME_TIME);
+
     const gs = globalGameState.current;
     if (!gs || !playerId) return;
     
@@ -253,12 +263,11 @@ export function GameScene() {
   const activeTheme = profile?.theme && THEMES[profile.theme] ? THEMES[profile.theme] : THEMES.default;
   const customBgTexture = useMemo(() => {
     if (profile?.customBackground && profile.customBackground.startsWith('data:image')) {
-      const loader = new THREE.TextureLoader();
-      const tex = loader.load(profile.customBackground);
-      tex.wrapS = THREE.RepeatWrapping;
-      tex.wrapT = THREE.RepeatWrapping;
-      tex.repeat.set(5, 5); // Tile the texture
-      return tex;
+      return getCachedTexture(profile.customBackground, (tex) => {
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        tex.repeat.set(5, 5); // Tile the texture
+      });
     }
     return null;
   }, [profile?.customBackground]);

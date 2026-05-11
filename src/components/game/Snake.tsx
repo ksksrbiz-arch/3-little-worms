@@ -3,8 +3,9 @@ import { useFrame } from '@react-three/fiber';
 import { Sphere, Text } from '@react-three/drei';
 import * as THREE from 'three';
 import { globalGameState } from '../../store/gameStore';
+import { getCachedTexture } from '../../lib/textureCache';
 
-export function Snake({ playerId, color, isLocal, name }: { playerId: string, color: string, isLocal: boolean, name?: string }) {
+export const Snake = React.memo(function Snake({ playerId, color, isLocal, name }: { playerId: string, color: string, isLocal: boolean, name?: string }) {
   const bodyRef = useRef<THREE.InstancedMesh>(null);
   const headRef = useRef<THREE.Mesh>(null);
   const particlesRef = useRef<THREE.InstancedMesh>(null);
@@ -25,11 +26,10 @@ export function Snake({ playerId, color, isLocal, name }: { playerId: string, co
   const baseColorObj = useMemo(() => new THREE.Color(skin.color), [skin.color]);
   const customTexture = useMemo(() => {
     if (skin.isCustom && skin.customUrl) {
-       const loader = new THREE.TextureLoader();
-       const tex = loader.load(skin.customUrl);
-       tex.wrapS = THREE.RepeatWrapping;
-       tex.wrapT = THREE.RepeatWrapping;
-       return tex;
+       return getCachedTexture(skin.customUrl, (tex) => {
+         tex.wrapS = THREE.RepeatWrapping;
+         tex.wrapT = THREE.RepeatWrapping;
+       });
     }
     return null;
   }, [skin.customUrl]);
@@ -252,4 +252,4 @@ export function Snake({ playerId, color, isLocal, name }: { playerId: string, co
       )}
     </group>
   );
-}
+});

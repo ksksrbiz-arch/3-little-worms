@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { globalGameState } from '../../store/gameStore';
 import { localCollectedOrbs } from './utils';
 
-export function Orbs() {
+export const Orbs = React.memo(function Orbs() {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
   const colorObj = useMemo(() => new THREE.Color(), []);
@@ -53,4 +53,4 @@ export function Orbs() {
       />
     </instancedMesh>
   );
-}
+});
