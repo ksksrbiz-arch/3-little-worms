@@ -33,6 +33,10 @@ This repository is configured to deploy to **Google Cloud Run** from GitHub Acti
 - `GCP_REGION` (example: `us-west2`)
 - `CLOUD_RUN_SERVICE` (Cloud Run service name)
 
+### Optional GitHub repository variables
+
+- `DEPLOY_BRANCH` (branch name to deploy from; defaults to `main`)
+
 ### Required GitHub repository secrets
 
 - `GCP_WORKLOAD_IDENTITY_PROVIDER`
