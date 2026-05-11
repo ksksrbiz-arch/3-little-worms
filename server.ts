@@ -127,8 +127,8 @@ io.on('connection', (socket) => {
       currentAngle: angle,
       inputs: { left: false, right: false, boost: false },
     };
-
     socket.emit('init', socket.id);
+    socket.emit('state', state);
   });
 
   socket.on('update_state', (data: PlayerStateUpdatePayload) => {

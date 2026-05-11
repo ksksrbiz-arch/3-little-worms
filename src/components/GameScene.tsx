@@ -5,8 +5,8 @@
 
 import { useEffect, useRef, useState, useMemo } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
-import { useGameStore, globalGameState, mobileInputs } from '../store/gameStore';
-import { WORLD_SIZE, TURN_SPEED, BOOST_SPEED, BASE_SPEED, Point, PlayerStateUpdatePayload } from '../shared/types';
+import { globalGameState, mobileInputs } from '../store/gameStore';
+import { WORLD_SIZE, TURN_SPEED, BOOST_SPEED, BASE_SPEED, type GameState, type Point, type PlayerStateUpdatePayload } from '../shared/types';
 import * as THREE from 'three';
 import { Sphere, Grid } from '@react-three/drei';
 
@@ -21,6 +21,7 @@ import { useUserStore } from '../store/userStore';
 import { audioManager } from '../lib/audio';
 import { getCachedTexture } from '../lib/textureCache';
 
+// Run client prediction at 60 FPS while capping large frame gaps to avoid catch-up spirals.
 const TARGET_FRAME_TIME = 1 / 60;
 const MAX_FRAME_DELTA = 1 / 30;
 const ORB_COLLECT_RADIUS_SQ = 4;
@@ -33,6 +34,13 @@ const THEMES: Record<string, { bg: string, cell: string, section: string }> = {
   cyberpunk: { bg: '#050210', cell: '#e0165c', section: '#00f0ff' },
   matrix: { bg: '#000000', cell: '#003b00', section: '#00ff41' },
   synthwave: { bg: '#0f0524', cell: '#7c3aed', section: '#f472b6' }
+};
+
+type GameSceneProps = {
+  gameState: GameState | null;
+  playerId: string | null;
+  sendPlayerState: (data: PlayerStateUpdatePayload) => void;
+  sendCollectOrb: (orbId: string) => void;
 };
 
 function distanceSquared(a: Point, b: Point) {
@@ -64,10 +72,10 @@ function createPlayerStatePayload(
   };
 }
 
-export function GameScene() {
-  const { gameState, playerId, sendPlayerState, sendCollectOrb } = useGameStore();
+export function GameScene({ gameState, playerId, sendPlayerState, sendCollectOrb }: GameSceneProps) {
   const { profile } = useUserStore();
-  const { camera } = useThree();
+  const { camera, size } = useThree();
+  const isNarrowView = size.width < 640;
   const inputs = useRef({ left: false, right: false, boost: false });
   const lightRef = useRef<THREE.DirectionalLight>(null);
   const frameAccumulator = useRef(0);
@@ -90,6 +98,26 @@ export function GameScene() {
     wasBoosting: false,
     lastSendTime: 0,
   });
+
+  const getCameraZ = (score: number) => {
+    if (isNarrowView) {
+      return Math.min(70, Math.max(38, 34 + score * 0.35));
+    }
+    return Math.min(45, Math.max(20, 20 + score * 0.2));
+  };
+
+  useEffect(() => {
+    globalGameState.current = gameState;
+  }, [gameState]);
+
+  useEffect(() => {
+    const player = playerId && gameState ? gameState.players[playerId] : null;
+    const head = player?.state === 'alive' ? player.segments[0] : null;
+    if (!player || !head) return;
+
+    camera.position.set(head.x, head.y, getCameraZ(player.score));
+    camera.lookAt(head.x, head.y, 0);
+  }, [camera, gameState, isNarrowView, playerId]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -121,7 +149,8 @@ export function GameScene() {
   }, []);
 
   useFrame((state, rawDelta) => {
-    frameAccumulator.current = Math.min(frameAccumulator.current + rawDelta, MAX_FRAME_DELTA);
+    // Accumulate variable render time and advance movement in fixed 60 FPS steps.
+    frameAccumulator.current += Math.min(rawDelta, MAX_FRAME_DELTA);
     if (frameAccumulator.current < TARGET_FRAME_TIME) return;
     const delta = TARGET_FRAME_TIME;
     frameAccumulator.current = Math.max(0, frameAccumulator.current - TARGET_FRAME_TIME);
@@ -138,6 +167,9 @@ export function GameScene() {
         localPlayerRef.current.segments = [...serverPlayer.segments];
         localPlayerRef.current.score = serverPlayer.score;
         localPlayerRef.current.currentAngle = serverPlayer.currentAngle;
+        const head = serverPlayer.segments[0];
+        camera.position.set(head.x, head.y, getCameraZ(serverPlayer.score));
+        camera.lookAt(head.x, head.y, 0);
       }
 
       if (!localPlayerRef.current.active) return;
@@ -267,7 +299,7 @@ export function GameScene() {
         localPlayerRef.current.lastSendTime = now;
       }
 
-      const targetZ = Math.min(45, Math.max(20, 20 + localPlayerRef.current.score * 0.2));
+      const targetZ = getCameraZ(localPlayerRef.current.score);
       
       // Smooth camera follow predicted head
       camera.position.x += (head.x - camera.position.x) * 10 * delta;
@@ -341,23 +373,27 @@ export function GameScene() {
         />
       )}
 
-      <Orbs />
-      <DeathExplosions />
-      <BackgroundDust WORLD_SIZE={WORLD_SIZE} />
-      <Hazards />
+      {playerId && (
+        <>
+          <Orbs />
+          <DeathExplosions />
+          <BackgroundDust WORLD_SIZE={WORLD_SIZE} />
+          <Hazards />
 
-      {Object.values(gameState.players).map((player) => {
-        if (player.state !== 'alive' || player.segments.length === 0) return null;
-        return (
-          <Snake
-            key={player.id}
-            playerId={player.id}
-            color={player.color}
-            isLocal={player.id === playerId}
-            name={player.name}
-          />
-        );
-      })}
+          {Object.values(gameState.players).map((player) => {
+            if (player.state !== 'alive' || player.segments.length === 0) return null;
+            return (
+              <Snake
+                key={player.id}
+                playerId={player.id}
+                color={player.color}
+                isLocal={player.id === playerId}
+                name={player.name}
+              />
+            );
+          })}
+        </>
+      )}
     </>
   );
 }

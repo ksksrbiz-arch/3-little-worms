@@ -1,6 +1,6 @@
 import React, { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { Sphere, Text } from '@react-three/drei';
+import { Sphere } from '@react-three/drei';
 import * as THREE from 'three';
 import { globalGameState } from '../../store/gameStore';
 import { getCachedTexture } from '../../lib/textureCache';
@@ -212,18 +212,6 @@ export const Snake = React.memo(function Snake({ playerId, color, isLocal, name 
           toneMapped={false}
           onBeforeCompile={shaderSetup}
         />
-        {name && (
-          <Text
-            position={[0, 1.5, 0]}
-            fontSize={0.5}
-            color="white"
-            outlineWidth={0.05}
-            outlineColor="black"
-            font="https://fonts.gstatic.com/s/inter/v12/UcCO3FwrK3iLTeHuS_fvQtMwCp50KnMw2boKoduKmMEVuLyfAZ9hiA.woff2"
-          >
-            {name}
-          </Text>
-        )}
       </Sphere>
       <instancedMesh ref={bodyRef} args={[null as any, null as any, 2000]} castShadow receiveShadow frustumCulled={false}>
         <sphereGeometry args={[0.6, 16, 16]} />

@@ -24,7 +24,7 @@ export async function getCached<T>(
 
   const request = loader()
     .then((data) => {
-      cache.set(key, { data, expires: Date.now() + ttlMs });
+      cache.set(key, { data, expires: now + ttlMs });
       return data;
     })
     .finally(() => {
