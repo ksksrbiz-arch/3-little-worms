@@ -116,7 +116,7 @@ export function GameScene({ gameState, playerId, sendPlayerState, sendCollectOrb
   }, []);
 
   useFrame((state, rawDelta) => {
-    frameAccumulator.current = Math.min(frameAccumulator.current + rawDelta, MAX_FRAME_DELTA);
+    frameAccumulator.current += Math.min(rawDelta, MAX_FRAME_DELTA);
     if (frameAccumulator.current < TARGET_FRAME_TIME) return;
     const delta = TARGET_FRAME_TIME;
     frameAccumulator.current = Math.max(0, frameAccumulator.current - TARGET_FRAME_TIME);

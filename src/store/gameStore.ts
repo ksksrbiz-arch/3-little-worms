@@ -24,6 +24,7 @@ const MAX_OPTIMISTIC_ORBS = 150;
 let lastUiUpdate = 0;
 let pendingJoinRequested = false;
 let pendingJoinOptions: { name?: string, color?: string } | undefined;
+let lastJoinOptions: { name?: string, color?: string } | undefined;
 
 function emitJoin(socket: Socket) {
   if (!pendingJoinRequested) return;
@@ -79,7 +80,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     socket.on('state', (state: GameState) => {
       const currentId = get().playerId;
       if (currentId && !state.players[currentId]) {
-        const currentPlayer = get().gameState?.players[currentId] || createLocalPlayer(currentId, pendingJoinOptions);
+        const currentPlayer = get().gameState?.players[currentId] || createLocalPlayer(currentId, lastJoinOptions);
         const visibleOrbs = Object.fromEntries(Object.entries(state.orbs).slice(0, MAX_OPTIMISTIC_ORBS));
         state = {
           ...state,
@@ -101,6 +102,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const { socket } = get();
     pendingJoinRequested = true;
     pendingJoinOptions = options;
+    lastJoinOptions = options;
 
     if (!socket) {
       get().connect();
