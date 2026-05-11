@@ -320,6 +320,7 @@ export function GameScene() {
             playerId={player.id}
             color={player.color}
             isLocal={player.id === playerId}
+            name={player.name}
           />
         );
       })}

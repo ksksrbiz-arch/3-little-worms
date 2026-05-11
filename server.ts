@@ -8,10 +8,12 @@ import { createServer as createViteServer } from 'vite';
 import { Server } from 'socket.io';
 import { createServer } from 'http';
 import { v4 as uuidv4 } from 'uuid';
-import {
+import type {
   GameState,
   Player,
   Orb,
+} from './src/shared/types.ts';
+import {
   WORLD_SIZE,
   BASE_SPEED,
   BOOST_SPEED,
