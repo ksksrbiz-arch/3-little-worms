@@ -1,4 +1,3 @@
-import { v4 as uuidv4 } from 'uuid';
 import { GameState, WORLD_SIZE, INITIAL_LENGTH, SEGMENT_SPACING, TURN_SPEED, BASE_SPEED, BOOST_SPEED } from '../shared/types.ts';
 import { SpatialHash } from './SpatialHash.ts';
 
@@ -46,7 +45,7 @@ export function updateBots(state: GameState, delta: number, spawnOrb: (x: number
   // Spawn bots
   if (aliveBots < TARGET_BOTS && Math.random() < 0.1) {
 
-    const id = 'bot-' + uuidv4();
+    const id = 'bot-' + crypto.randomUUID();
     const angle = Math.random() * Math.PI * 2;
     const startX = (Math.random() - 0.5) * (WORLD_SIZE - 20);
     const startY = (Math.random() - 0.5) * (WORLD_SIZE - 20);
