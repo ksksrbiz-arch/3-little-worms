@@ -1,3 +1,7 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+*/
 
 import { useGameStore, mobileInputs } from '../store/gameStore';
 import { useUserStore } from '../store/userStore';

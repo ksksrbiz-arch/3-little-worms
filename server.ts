@@ -1,7 +1,13 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+*/
+
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
-import { WebSocketServer, WebSocket } from 'ws';
+import { Server } from 'socket.io';
 import { createServer } from 'http';
+import { v4 as uuidv4 } from 'uuid';
 import {
   GameState,
   Player,
@@ -32,18 +38,21 @@ export function getStripe(): Stripe {
   }
   return stripeClient;
 }
-
-const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
+const io = new Server(httpServer, {
+  cors: {
+    origin: '*',
+  },
+});
 
 const PORT = 3000;
 
 const COLORS = [
-  '#ff7eb3',
-  '#ffb86c',
-  '#f1fa8c',
-  '#50fa7b',
-  '#8be9fd',
-  '#bd93f9',
+  '#ff7eb3', // vibrant pink
+  '#ffb86c', // vibrant orange
+  '#f1fa8c', // vibrant yellow
+  '#50fa7b', // vibrant green
+  '#8be9fd', // vibrant blue
+  '#bd93f9', // vibrant purple
 ];
 
 const state: GameState = {
@@ -55,9 +64,9 @@ const state: GameState = {
 
 function spawnOrb(x?: number, y?: number, value?: number, color?: string, force = false) {
   if (!force && Object.keys(state.orbs).length >= MAX_ORBS) return;
-  const id = crypto.randomUUID();
+  const id = uuidv4();
   if (value === undefined) {
-    value = Math.random() < 0.1 ? 5 : 1;
+    value = Math.random() < 0.1 ? 5 : 1; // 10% chance to be large orb
   }
   state.orbs[id] = {
     id,
@@ -75,96 +84,73 @@ for (let i = 0; i < 150; i++) {
 
 let snakeCounter = 1;
 
-// Track WebSocket → player ID
-const connections = new Map<WebSocket, string>();
+io.on('connection', (socket) => {
+  console.log('Player connected:', socket.id);
 
-function broadcast(data: unknown) {
-  const json = JSON.stringify(data);
-  for (const client of wss.clients) {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(json);
+  socket.on('join', (options?: { name?: string, color?: string }) => {
+    const name = options?.name || `Snake-${snakeCounter++}`;
+    const color = options?.color || COLORS[Math.floor(Math.random() * COLORS.length)];
+    const startX = (Math.random() - 0.5) * (WORLD_SIZE - 20);
+    const startY = (Math.random() - 0.5) * (WORLD_SIZE - 20);
+    const angle = Math.random() * Math.PI * 2;
+
+    const segments = [];
+    for (let i = 0; i < INITIAL_LENGTH; i++) {
+      segments.push({
+        x: startX - Math.cos(angle) * i * SEGMENT_SPACING,
+        y: startY - Math.sin(angle) * i * SEGMENT_SPACING,
+      });
     }
-  }
-}
 
-wss.on('connection', (ws) => {
-  console.log('Client connected');
+    state.players[socket.id] = {
+      id: socket.id,
+      name,
+      color,
+      segments,
+      score: INITIAL_LENGTH,
+      isBoosting: false,
+      state: 'alive',
+      currentAngle: angle,
+      inputs: { left: false, right: false, boost: false },
+    };
 
-  ws.on('message', (raw) => {
-    try {
-      const msg = JSON.parse(raw.toString());
-      const playerId = connections.get(ws);
-
-      if (msg.type === 'join') {
-        const name = msg.name || `Snake-${snakeCounter++}`;
-        const color = msg.color || COLORS[Math.floor(Math.random() * COLORS.length)];
-        const startX = (Math.random() - 0.5) * (WORLD_SIZE - 20);
-        const startY = (Math.random() - 0.5) * (WORLD_SIZE - 20);
-        const angle = Math.random() * Math.PI * 2;
-
-        const segments = [];
-        for (let i = 0; i < INITIAL_LENGTH; i++) {
-          segments.push({
-            x: startX - Math.cos(angle) * i * SEGMENT_SPACING,
-            y: startY - Math.sin(angle) * i * SEGMENT_SPACING,
-          });
-        }
-
-        const id = crypto.randomUUID();
-        connections.set(ws, id);
-
-        state.players[id] = {
-          id,
-          name,
-          color,
-          segments,
-          score: INITIAL_LENGTH,
-          isBoosting: false,
-          state: 'alive',
-          currentAngle: angle,
-          inputs: { left: false, right: false, boost: false },
-        };
-
-        ws.send(JSON.stringify({ type: 'init', id }));
-
-      } else if (msg.type === 'update_state' && playerId) {
-        const player = state.players[playerId];
-        if (player && player.state === 'alive') {
-          player.segments = msg.segments;
-          player.score = msg.score;
-          player.currentAngle = msg.currentAngle;
-          player.isBoosting = msg.isBoosting;
-
-          if (msg.state === 'dead') {
-            player.state = 'dead';
-            player.segments.forEach((seg: { x: number; y: number }, i: number) => {
-              if (i % 2 === 0) spawnOrb(seg.x, seg.y, 1, player.color, true);
-            });
-          }
-        }
-      } else if (msg.type === 'collect_orb' && playerId) {
-        if (state.orbs[msg.orbId]) {
-          delete state.orbs[msg.orbId];
-        }
-      }
-    } catch {
-      // Ignore malformed messages
-    }
+    socket.emit('init', socket.id);
   });
 
-  ws.on('close', () => {
-    console.log('Client disconnected');
-    const playerId = connections.get(ws);
-    if (playerId) {
-      const player = state.players[playerId];
-      if (player && player.state === 'alive') {
+  socket.on('update_state', (data: { segments: any[], score: number, currentAngle: number, isBoosting: boolean, state: string }) => {
+    const player = state.players[socket.id];
+    if (player && player.state === 'alive') {
+      player.segments = data.segments;
+      player.score = data.score;
+      player.currentAngle = data.currentAngle;
+      player.isBoosting = data.isBoosting;
+      
+      if (data.state === 'dead') {
+        player.state = 'dead';
+        // Drop orbs
         player.segments.forEach((seg, i) => {
           if (i % 2 === 0) spawnOrb(seg.x, seg.y, 1, player.color, true);
         });
       }
-      delete state.players[playerId];
-      connections.delete(ws);
     }
+  });
+
+  socket.on('collect_orb', (orbId: string) => {
+    if (state.orbs[orbId]) {
+      delete state.orbs[orbId];
+    }
+  });
+
+  socket.on('disconnect', () => {
+    console.log('Player disconnected:', socket.id);
+    const player = state.players[socket.id];
+    if (player && player.state === 'alive') {
+      // Drop orbs
+      player.segments.forEach((seg, i) => {
+        if (i % 2 === 0) spawnOrb(seg.x, seg.y, 1, player.color, true);
+      });
+    }
+    delete state.players[socket.id];
   });
 });
 
@@ -177,7 +163,7 @@ setInterval(() => {
   const delta = (nowServer - lastTimeServer) / 1000;
   lastTimeServer = nowServer;
 
-  // Boosting orb drops for human players
+  // Update players (just for boosting orb drops)
   for (const id in state.players) {
     const player = state.players[id];
     if (player.state === 'alive' && player.isBoosting) {
@@ -198,7 +184,7 @@ setInterval(() => {
 
   // Hazards
   if (Math.random() < 0.005 && Object.keys(state.hazards).length < 5) {
-    const id = crypto.randomUUID();
+    const id = uuidv4();
     state.hazards[id] = {
       id,
       x: (Math.random() - 0.5) * WORLD_SIZE * 0.8,
@@ -229,15 +215,17 @@ setInterval(() => {
     .slice(0, 10)
     .map(p => ({ id: p.id, name: p.name, score: Math.floor(p.score), color: p.color }));
 
-  // Broadcast state
-  if (wss.clients.size > 0) {
-    broadcast({ type: 'state', data: state });
+  // Broadcast state async and volatile to prevent queue backup and UI freezes
+  if (io.engine.clientsCount > 0) {
+    setImmediate(() => {
+      io.volatile.emit('state', state);
+    });
   }
 
 }, 1000 / TICK_RATE);
 
 async function startServer() {
-  app.get('/api/health', (_req, res) => {
+  app.get('/api/health', (req, res) => {
     res.json({ status: 'ok' });
   });
 
@@ -245,7 +233,7 @@ async function startServer() {
     try {
       const { userId } = req.body;
       const stripe = getStripe();
-
+      
       const session = await stripe.checkout.sessions.create({
         payment_method_types: ['card'],
         line_items: [
@@ -254,17 +242,20 @@ async function startServer() {
               currency: 'usd',
               product_data: {
                 name: '1000 Neon Coins',
-                description: 'Currency for 3 Little Worms shop',
+                description: 'Currency for Neon Snake shop',
               },
-              unit_amount: 500,
+              unit_amount: 500, // $5.00
             },
             quantity: 1,
           },
         ],
         mode: 'payment',
+        // In a real app we'd verify the domain dynamically and pass userId to metadata
         success_url: `${process.env.APP_URL || 'http://localhost:3000'}?payment=success&session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${process.env.APP_URL || 'http://localhost:3000'}?payment=cancelled`,
-        metadata: { userId },
+        metadata: {
+          userId: userId
+        }
       });
 
       res.json({ url: session.url });

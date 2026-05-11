@@ -1,8 +1,14 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+*/
+
 import { create } from 'zustand';
-import { GameState } from '../shared/types';
+import { io, Socket } from 'socket.io-client';
+import { GameState, Player } from '../shared/types';
 
 interface GameStore {
-  ws: WebSocket | null;
+  socket: Socket | null;
   gameState: GameState | null;
   playerId: string | null;
   connect: () => void;
@@ -16,57 +22,49 @@ export const mobileInputs = { left: false, right: false, boost: false };
 let lastUiUpdate = 0;
 
 export const useGameStore = create<GameStore>((set, get) => ({
-  ws: null,
+  socket: null,
   gameState: null,
   playerId: null,
   connect: () => {
-    if (get().ws) return;
+    if (get().socket) return;
+    
+    const socket = io();
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
-
-    ws.onopen = () => {
+    socket.on('connect', () => {
       console.log('Connected to server');
-    };
+    });
 
-    ws.onmessage = (event) => {
-      const msg = JSON.parse(event.data);
-      if (msg.type === 'init') {
-        set({ playerId: msg.id });
-      } else if (msg.type === 'state') {
-        globalGameState.current = msg.data;
-        const now = Date.now();
-        if (now - lastUiUpdate > 100) {
-          set({ gameState: msg.data });
-          lastUiUpdate = now;
-        }
+    socket.on('init', (id: string) => {
+      set({ playerId: id });
+    });
+
+    socket.on('state', (state: GameState) => {
+      globalGameState.current = state;
+      const now = Date.now();
+      if (now - lastUiUpdate > 100) { // Throttle React updates to 10Hz
+        set({ gameState: state });
+        lastUiUpdate = now;
       }
-    };
+    });
 
-    ws.onclose = () => {
-      console.log('Disconnected from server');
-      set({ ws: null, playerId: null });
-      setTimeout(() => get().connect(), 2000);
-    };
-
-    set({ ws });
+    set({ socket });
   },
-  joinGame: (options?: { name?: string; color?: string }) => {
-    const { ws } = get();
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'join', ...options }));
+  joinGame: (options?: { name?: string, color?: string }) => {
+    const { socket } = get();
+    if (socket) {
+      socket.emit('join', options);
     }
   },
   sendPlayerState: (data) => {
-    const { ws } = get();
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'update_state', ...data }));
+    const { socket } = get();
+    if (socket) {
+      socket.emit('update_state', data);
     }
   },
   sendCollectOrb: (orbId) => {
-    const { ws } = get();
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'collect_orb', orbId }));
+    const { socket } = get();
+    if (socket) {
+      socket.emit('collect_orb', orbId);
     }
   },
 }));
