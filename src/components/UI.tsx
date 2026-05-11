@@ -115,12 +115,12 @@ export function UI() {
   }, [user, profile]);
 
   const handleJoinGame = () => {
-    const deferAfterTap = (callback: () => void) => window.requestAnimationFrame(callback);
+    const deferToNextFrame = (callback: () => void) => window.requestAnimationFrame(callback);
     const options = profile
       ? { name: profile.displayName, color: profile.skin === 'default' ? undefined : profile.skin }
       : undefined;
-    deferAfterTap(() => audioManager.init());
-    deferAfterTap(() => joinGame(options));
+    deferToNextFrame(() => audioManager.init());
+    deferToNextFrame(() => joinGame(options));
   };
 
   useEffect(() => {

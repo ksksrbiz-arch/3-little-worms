@@ -116,6 +116,7 @@ export function GameScene({ gameState, playerId, sendPlayerState, sendCollectOrb
   }, []);
 
   useFrame((state, rawDelta) => {
+    // Accumulate variable render time and advance movement in fixed 60 FPS steps.
     frameAccumulator.current += Math.min(rawDelta, MAX_FRAME_DELTA);
     if (frameAccumulator.current < TARGET_FRAME_TIME) return;
     const delta = TARGET_FRAME_TIME;

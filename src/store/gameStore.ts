@@ -20,6 +20,7 @@ interface GameStore {
 
 export const globalGameState: { current: GameState | null } = { current: null };
 export const mobileInputs = { left: false, right: false, boost: false };
+// Keep optimistic joins light enough for mobile/parallel E2E while still showing nearby collectibles.
 const MAX_OPTIMISTIC_ORBS = 150;
 let lastUiUpdate = 0;
 let pendingJoinRequested = false;
