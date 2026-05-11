@@ -23,4 +23,4 @@ COPY --from=build /app/src/shared ./src/shared
 
 EXPOSE 3000
 
-CMD ["node", "server.ts"]
+CMD ["npm", "start"]
