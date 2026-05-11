@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
-import { GameState, WORLD_SIZE, INITIAL_LENGTH, SEGMENT_SPACING, TURN_SPEED, BASE_SPEED, BOOST_SPEED } from '../shared/types';
-import { SpatialHash } from './SpatialHash';
+import { GameState, WORLD_SIZE, INITIAL_LENGTH, SEGMENT_SPACING, TURN_SPEED, BASE_SPEED, BOOST_SPEED } from '../shared/types.ts';
+import { SpatialHash } from './SpatialHash.ts';
 
 const COLORS = [
   '#ff7eb3', '#ffb86c', '#f1fa8c', '#50fa7b', '#8be9fd', '#bd93f9',
