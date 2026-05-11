@@ -47,6 +47,10 @@ const io = new Server(httpServer, {
 });
 
 const PORT = 3000;
+const GCLOUD_DEPLOY_URL = 'https://ais-dev-sycqofecbkeaxlxnkvun6l-104425727067.us-east5.run.app';
+const APP_URL =
+  process.env.APP_URL ||
+  (process.env.NODE_ENV === 'production' ? GCLOUD_DEPLOY_URL : `http://localhost:${PORT}`);
 
 const COLORS = [
   '#ff7eb3', // vibrant pink
@@ -253,8 +257,8 @@ async function startServer() {
         ],
         mode: 'payment',
         // In a real app we'd verify the domain dynamically and pass userId to metadata
-        success_url: `${process.env.APP_URL || 'http://localhost:3000'}?payment=success&session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${process.env.APP_URL || 'http://localhost:3000'}?payment=cancelled`,
+        success_url: `${APP_URL}?payment=success&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${APP_URL}?payment=cancelled`,
         metadata: {
           userId: userId
         }
