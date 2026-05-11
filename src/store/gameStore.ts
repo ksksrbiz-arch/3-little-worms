@@ -20,6 +20,7 @@ interface GameStore {
 
 export const globalGameState: { current: GameState | null } = { current: null };
 export const mobileInputs = { left: false, right: false, boost: false };
+const MAX_OPTIMISTIC_ORBS = 150;
 let lastUiUpdate = 0;
 let pendingJoinRequested = false;
 let pendingJoinOptions: { name?: string, color?: string } | undefined;
@@ -79,7 +80,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const currentId = get().playerId;
       if (currentId && !state.players[currentId]) {
         const currentPlayer = get().gameState?.players[currentId] || createLocalPlayer(currentId, pendingJoinOptions);
-        const visibleOrbs = Object.fromEntries(Object.entries(state.orbs).slice(0, 150));
+        const visibleOrbs = Object.fromEntries(Object.entries(state.orbs).slice(0, MAX_OPTIMISTIC_ORBS));
         state = {
           ...state,
           players: { [currentId]: currentPlayer },
@@ -110,7 +111,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const id = socket.id;
       if (id) {
         const state = globalGameState.current || get().gameState || { players: {}, orbs: {}, leaderboard: [], hazards: {} };
-        const visibleOrbs = Object.fromEntries(Object.entries(state.orbs).slice(0, 150));
+        const visibleOrbs = Object.fromEntries(Object.entries(state.orbs).slice(0, MAX_OPTIMISTIC_ORBS));
         if (!state.players[id]) {
           const nextState = {
             ...state,

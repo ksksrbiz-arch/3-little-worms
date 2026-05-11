@@ -115,6 +115,7 @@ export function UI() {
   }, [user, profile]);
 
   const handleJoinGame = () => {
+    // Defer work kicked off by the click so Playwright/mobile taps can complete before the scene mounts.
     window.setTimeout(() => audioManager.init(), 0);
     const options = profile
       ? { name: profile.displayName, color: profile.skin === 'default' ? undefined : profile.skin }

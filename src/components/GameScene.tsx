@@ -21,6 +21,7 @@ import { useUserStore } from '../store/userStore';
 import { audioManager } from '../lib/audio';
 import { getCachedTexture } from '../lib/textureCache';
 
+// Run client prediction at 60 FPS while capping large frame gaps to avoid catch-up spirals.
 const TARGET_FRAME_TIME = 1 / 60;
 const MAX_FRAME_DELTA = 1 / 30;
 
