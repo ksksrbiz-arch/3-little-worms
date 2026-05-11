@@ -73,6 +73,7 @@ jobs:
         run: |
           gcloud run deploy "${CLOUD_RUN_SERVICE}" \
             --source . \
+            --clear-build-service-account \
             --project "${GCP_PROJECT_ID}" \
             --region "${GCP_REGION}" \
             --quiet
