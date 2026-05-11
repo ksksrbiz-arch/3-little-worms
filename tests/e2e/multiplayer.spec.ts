@@ -126,20 +126,20 @@ test.describe('multiplayer', () => {
       await Promise.all([page1.goto('/'), page2.goto('/')]);
       await Promise.all([joinAndWaitAlive(page1), joinAndWaitAlive(page2)]);
 
-      // Give the server a few ticks (at 60 Hz) to broadcast state that
-      // includes both players.
-      await page1.waitForTimeout(2_000);
-
-      // At least one received state should contain ≥ 2 alive players.
-      const stateWithBothPlayers = receivedStates.find((s) => {
-        const players = s.players as Record<string, { state: string }>;
-        const aliveCount = Object.values(players).filter(
-          (p) => p.state === 'alive'
-        ).length;
-        return aliveCount >= 2;
-      });
-
-      expect(stateWithBothPlayers).toBeDefined();
+      // Poll until a received state snapshot contains ≥ 2 alive players.
+      await expect
+        .poll(
+          () =>
+            receivedStates.some((s) => {
+              const players = s.players as Record<string, { state: string }>;
+              return (
+                Object.values(players).filter((p) => p.state === 'alive')
+                  .length >= 2
+              );
+            }),
+          { timeout: 10_000 }
+        )
+        .toBe(true);
     } finally {
       await ctx1.close();
       await ctx2.close();

@@ -81,8 +81,8 @@ test.describe('page load', () => {
     const errors: string[] = [];
     page.on('pageerror', (err) => errors.push(err.message));
     await page.goto('/');
-    // Give the Three.js canvas a moment to initialise.
-    await page.waitForTimeout(3_000);
+    // Wait until the Three.js canvas has painted before asserting errors.
+    await expect(page.locator('canvas')).toBeVisible({ timeout: 15_000 });
     expect(errors).toHaveLength(0);
   });
 });
