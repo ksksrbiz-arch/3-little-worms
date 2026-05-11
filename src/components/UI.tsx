@@ -323,39 +323,36 @@ export function UI() {
       </AnimatePresence>
 
       {/* Menus */}
-      <AnimatePresence>
-        {(!player || isDead) && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.9 }}
-            className="absolute inset-0 flex items-center justify-center pointer-events-auto bg-black/60 backdrop-blur-sm z-50"
-          >
-            <div className="bg-zinc-900/90 p-8 rounded-3xl border border-white/10 shadow-2xl max-w-md w-full flex flex-col items-center gap-6">
-              {isDead && (
-                <div className="text-center">
-                  <h2 className="text-4xl font-black text-red-500 mb-2">YOU DIED</h2>
-                  <p className="text-white/60">Final Length: {Math.floor(player.score)}</p>
-                </div>
-              )}
-              
-              {!isDead && (
-                <div className="text-center">
-                  <h2 className="text-3xl font-black text-white mb-2">JOIN ARENA</h2>
-                  <p className="text-white/60 text-sm">Steer with A/D or Left/Right. Space to boost.</p>
-                </div>
-              )}
-              
-              <button
-                onClick={handleJoinGame}
-                className="w-full py-4 bg-white text-black font-bold rounded-xl hover:bg-gray-200 transition-colors active:scale-95 text-xl select-none"
-              >
-                {isDead ? 'RESPAWN' : 'PLAY'}
-              </button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {(!player || isDead) && (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="absolute inset-0 flex items-center justify-center pointer-events-auto bg-black/60 backdrop-blur-sm z-50"
+        >
+          <div className="bg-zinc-900/90 p-8 rounded-3xl border border-white/10 shadow-2xl max-w-md w-full flex flex-col items-center gap-6">
+            {isDead && (
+              <div className="text-center">
+                <h2 className="text-4xl font-black text-red-500 mb-2">YOU DIED</h2>
+                <p className="text-white/60">Final Length: {Math.floor(player.score)}</p>
+              </div>
+            )}
+            
+            {!isDead && (
+              <div className="text-center">
+                <h2 className="text-3xl font-black text-white mb-2">JOIN ARENA</h2>
+                <p className="text-white/60 text-sm">Steer with A/D or Left/Right. Space to boost.</p>
+              </div>
+            )}
+            
+            <button
+              onClick={handleJoinGame}
+              className="w-full py-4 bg-white text-black font-bold rounded-xl hover:bg-gray-200 transition-colors active:scale-95 text-xl select-none"
+            >
+              {isDead ? 'RESPAWN' : 'PLAY'}
+            </button>
+          </div>
+        </motion.div>
+      )}
 
       {/* Mobile Controls */}
       {isAlive && (
