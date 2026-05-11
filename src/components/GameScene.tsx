@@ -250,8 +250,6 @@ export function GameScene() {
     }
   });
 
-  if (!gameState) return null;
-
   const activeTheme = profile?.theme && THEMES[profile.theme] ? THEMES[profile.theme] : THEMES.default;
   const customBgTexture = useMemo(() => {
     if (profile?.customBackground && profile.customBackground.startsWith('data:image')) {
@@ -264,6 +262,8 @@ export function GameScene() {
     }
     return null;
   }, [profile?.customBackground]);
+
+  if (!gameState) return null;
 
   return (
     <>
