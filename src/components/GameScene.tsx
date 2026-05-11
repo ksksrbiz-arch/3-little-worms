@@ -88,9 +88,9 @@ export function GameScene() {
   }, []);
 
   useFrame((state, rawDelta) => {
-    frameAccumulator.current += Math.min(rawDelta, MAX_FRAME_DELTA);
+    frameAccumulator.current = Math.min(frameAccumulator.current + rawDelta, MAX_FRAME_DELTA);
     if (frameAccumulator.current < TARGET_FRAME_TIME) return;
-    const delta = Math.min(frameAccumulator.current, MAX_FRAME_DELTA);
+    const delta = frameAccumulator.current;
     frameAccumulator.current = Math.max(0, frameAccumulator.current - TARGET_FRAME_TIME);
 
     const gs = globalGameState.current;
