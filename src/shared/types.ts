@@ -62,6 +62,55 @@ export type LeaderboardEntry = {
   color: string;
 };
 
+// Per-client AOI snapshot delivered via the `snap` socket event. Carries only
+// entities within the recipient's viewport plus a small buffer.
+export type Snapshot = {
+  tickSeq: number;
+  serverTimeMs: number;
+  lastInputSeq: number;
+  selfId: string | null;
+  players: SnapshotPlayer[];
+  orbs: SnapshotOrb[];
+  hazards: SnapshotHazard[];
+};
+
+export type SnapshotPlayer = {
+  id: string;
+  name: string;
+  color: string;
+  score: number;
+  currentAngle: number;
+  isBoosting: boolean;
+  state: PlayerState;
+  segments: Point[];
+};
+
+export type SnapshotOrb = {
+  id: string;
+  x: number;
+  y: number;
+  value: number;
+  color: string;
+};
+
+export type SnapshotHazard = {
+  id: string;
+  x: number;
+  y: number;
+  radius: number;
+  state: 'warning' | 'active';
+  timeLeft: number;
+};
+
+// Client → server tiny input packet (replaces the legacy `update_state`
+// emit). Sent at the client's render rate; the server samples its
+// per-tick angle/boost from the most recent input.
+export type InputPacket = {
+  seq: number;       // monotonically increasing per client
+  angleTarget: number; // desired heading in radians
+  boost: boolean;
+};
+
 export const WORLD_SIZE = 150;
 export const BASE_SPEED = 15;
 export const BOOST_SPEED = 30;
@@ -72,11 +121,23 @@ export const INITIAL_LENGTH = 10;
 export const SEGMENT_SPACING = 0.5;
 export const TURN_SPEED = Math.PI * 3; // Radians per second
 
+// Visible segment radius in world units (matches the renderer in
+// src/components/game/Snake.tsx). The collision radius is intentionally
+// slightly smaller so head-vs-body kills feel forgiving despite lag — the
+// "lenient detection" rule from the architecture spec.
+export const SEGMENT_VISUAL_RADIUS = 0.6;
+export const HITBOX_SCALE_FACTOR = 0.85;
+export const SEGMENT_HITBOX_RADIUS = SEGMENT_VISUAL_RADIUS * HITBOX_SCALE_FACTOR;
+export const HEAD_HITBOX_RADIUS = 0.8 * HITBOX_SCALE_FACTOR;
+
 // Slither.io-style network tuning
-// Server broadcasts state at a lower rate than the simulation tick to bound
-// bandwidth. The client interpolates between snapshots to hide the cadence.
+// Server simulates at TICK_RATE (60 Hz) but broadcasts state at the lower
+// BROADCAST_RATE (20 Hz) to bound bandwidth. The client interpolates between
+// snapshots to hide the cadence.
 export const BROADCAST_RATE = 20; // Hz
 export const BROADCAST_INTERVAL_MS = Math.round(1000 / BROADCAST_RATE); // 50ms
+// Alias used by the binary `snap` wire path.
+export const SNAPSHOT_RATE = BROADCAST_RATE;
 
 // Spatial-hash cell sizes used by both bot AI and per-socket relevance
 // filtering. Coarse cell for heads/orbs; fine cell for body-segment collisions.
@@ -92,3 +153,8 @@ export const AOI_RADIUS = 60;
 // and the snap threshold for local-player reconciliation.
 export const INTERP_DELAY_MS = 100;
 export const RECONCILE_SNAP_THRESHOLD = 2; // world units
+
+// Binary snapshot wire format flags (src/shared/wire.ts).
+export const SNAPSHOT_BINARY_VERSION = 1;
+export const SNAPSHOT_FIXED_POINT_SCALE = 100; // 1 world unit = 100 wire units (i16 → ±327.67 units, easily covers WORLD_SIZE)
+export const SNAPSHOT_ANGLE_SCALE = 10000; // i16 fixed-point for angle in radians
