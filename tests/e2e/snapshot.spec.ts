@@ -133,9 +133,9 @@ test.describe('binary snapshots (Step 6) and AOI (Step 2)', () => {
       expect(bLast.players.find((p) => p.id === aLast.selfId)).toBeUndefined();
     } else {
       // They happened to spawn close enough to be inside each other's AOI;
-      // the test is still valid as long as the AOI mechanism let them
-      // see each other (this exercises the inclusion path).
-      expect(true).toBe(true);
+      // assert the inclusion path actually worked (each side sees the other).
+      expect(aLast.players.find((p) => p.id === bLast.selfId)).toBeTruthy();
+      expect(bLast.players.find((p) => p.id === aLast.selfId)).toBeTruthy();
     }
   });
 

@@ -426,9 +426,6 @@ setInterval(() => {
 
   // Build per-socket AOI snapshots once per wakeup. The spatial hash is
   // built once and shared across all sockets so cost is O(N + S·k) rather
-  // than O(N·S).
-  // Build per-socket AOI snapshots once per wakeup. The spatial hash is
-  // built once and shared across all sockets so cost is O(N + S·k) rather
   // than O(N·S). Snapshots are throttled to SNAPSHOT_RATE; clients are
   // expected to interpolate between snapshots.
   const shouldEmitSnapshots = (tickSeq % TICKS_PER_SNAPSHOT) === 0;
