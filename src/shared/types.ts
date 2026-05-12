@@ -114,7 +114,7 @@ export type InputPacket = {
 export const WORLD_SIZE = 150;
 export const BASE_SPEED = 15;
 export const BOOST_SPEED = 30;
-export const TICK_RATE = 60; // 60 updates per second
+export const TICK_RATE = 60; // Server simulation Hz (bots, hazards, physics)
 export const ORB_SPAWN_RATE = 0.1; // Orbs per tick
 export const MAX_ORBS = 300;
 export const INITIAL_LENGTH = 10;
@@ -130,24 +130,31 @@ export const HITBOX_SCALE_FACTOR = 0.85;
 export const SEGMENT_HITBOX_RADIUS = SEGMENT_VISUAL_RADIUS * HITBOX_SCALE_FACTOR;
 export const HEAD_HITBOX_RADIUS = 0.8 * HITBOX_SCALE_FACTOR;
 
-// Per-client viewport radius used for AOI (Area-Of-Interest) snapshots, plus
-// a buffer so entities just off-screen still stream in for smooth interp.
-export const VIEWPORT_RADIUS = 35;
-export const AOI_BUFFER = 10;
-export const AOI_RADIUS = VIEWPORT_RADIUS + AOI_BUFFER;
+// Slither.io-style network tuning
+// Server simulates at TICK_RATE (60 Hz) but broadcasts state at the lower
+// BROADCAST_RATE (20 Hz) to bound bandwidth. The client interpolates between
+// snapshots to hide the cadence.
+export const BROADCAST_RATE = 20; // Hz
+export const BROADCAST_INTERVAL_MS = Math.round(1000 / BROADCAST_RATE); // 50ms
+// Alias used by the binary `snap` wire path.
+export const SNAPSHOT_RATE = BROADCAST_RATE;
 
-// Spatial-hash cell size used by the server tick loop. Sized so the AOI
-// query touches only a small handful of cells (~9) and the collision query
-// touches just 1-4 cells around each head.
-export const SPATIAL_HASH_CELL_SIZE = 10;
+// Spatial-hash cell sizes used by both bot AI and per-socket relevance
+// filtering. Coarse cell for heads/orbs; fine cell for body-segment collisions.
+export const HASH_CELL_COARSE = 20;
+export const HASH_CELL_FINE = 5;
 
-// Snapshot broadcast rate. The simulation runs at TICK_RATE (60 Hz) but
-// each client only receives snapshots at SNAPSHOT_RATE (20 Hz, matching
-// the slither.io-style architecture). Clients interpolate between these
-// snapshots to render at full frame rate.
-export const SNAPSHOT_RATE = 20;
+// Area-of-interest radius (world units) used for per-socket broadcasts. Must
+// be comfortably larger than the client's view radius so entities don't pop
+// in/out at the screen edge.
+export const AOI_RADIUS = 60;
 
-// Snapshot wire format flags
+// Client-side render delay for snapshot interpolation (~2 broadcast intervals)
+// and the snap threshold for local-player reconciliation.
+export const INTERP_DELAY_MS = 100;
+export const RECONCILE_SNAP_THRESHOLD = 2; // world units
+
+// Binary snapshot wire format flags (src/shared/wire.ts).
 export const SNAPSHOT_BINARY_VERSION = 1;
 export const SNAPSHOT_FIXED_POINT_SCALE = 100; // 1 world unit = 100 wire units (i16 → ±327.67 units, easily covers WORLD_SIZE)
 export const SNAPSHOT_ANGLE_SCALE = 10000; // i16 fixed-point for angle in radians

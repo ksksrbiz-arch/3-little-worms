@@ -5,8 +5,18 @@
 
 import { useEffect, useRef, useState, useMemo } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
-import { globalGameState, mobileInputs } from '../store/gameStore';
-import { WORLD_SIZE, TURN_SPEED, BOOST_SPEED, BASE_SPEED, type GameState, type Point, type PlayerStateUpdatePayload } from '../shared/types';
+import { globalGameState, mobileInputs, localServerView } from '../store/gameStore';
+import {
+  WORLD_SIZE,
+  TURN_SPEED,
+  BOOST_SPEED,
+  BASE_SPEED,
+  INTERP_DELAY_MS,
+  RECONCILE_SNAP_THRESHOLD,
+  type GameState,
+  type Point,
+  type PlayerStateUpdatePayload,
+} from '../shared/types';
 import * as THREE from 'three';
 import { Sphere, Grid } from '@react-three/drei';
 
@@ -97,6 +107,15 @@ export function GameScene({ gameState, playerId, sendPlayerState, sendCollectOrb
     lastSendTime: 0,
   });
 
+  // Lenient-validation reconciliation: track the server snapshot we've already
+  // applied so we only reconcile once per snapshot, plus a residual offset
+  // that we decay over ~100ms when the server head is close to ours.
+  const reconcileRef = useRef<{ consumedSeq: number; offX: number; offY: number }>({
+    consumedSeq: 0,
+    offX: 0,
+    offY: 0,
+  });
+
   const getCameraZ = (score: number) => {
     if (isNarrowView) {
       return Math.min(70, Math.max(38, 34 + score * 0.35));
@@ -167,6 +186,66 @@ export function GameScene({ gameState, playerId, sendPlayerState, sendCollectOrb
       }
 
       if (!localPlayerRef.current.active) return;
+
+      // Lenient-validation reconciliation: when a fresh server snapshot has
+      // arrived, compare its head position to our predicted head. Snap if the
+      // discrepancy is large, otherwise schedule a smooth correction over the
+      // next ~100ms so motion stays fluid and "tight" like Slither.io.
+      if (
+        localServerView.seq !== reconcileRef.current.consumedSeq &&
+        localServerView.head &&
+        localPlayerRef.current.segments.length > 0
+      ) {
+        reconcileRef.current.consumedSeq = localServerView.seq;
+        const predHead = localPlayerRef.current.segments[0];
+        const dx = localServerView.head.x - predHead.x;
+        const dy = localServerView.head.y - predHead.y;
+        const distSq = dx * dx + dy * dy;
+        if (distSq > RECONCILE_SNAP_THRESHOLD * RECONCILE_SNAP_THRESHOLD) {
+          // Hard snap: trust the server. Replace local segments with the
+          // server-authoritative chain and clear any pending residual offset.
+          if (localServerView.segments && localServerView.segments.length > 0) {
+            localPlayerRef.current.segments = localServerView.segments.map((s) => ({
+              x: s.x,
+              y: s.y,
+            }));
+          }
+          if (localServerView.currentAngle !== null) {
+            localPlayerRef.current.currentAngle = localServerView.currentAngle;
+          }
+          if (localServerView.score !== null) {
+            localPlayerRef.current.score = localServerView.score;
+          }
+          reconcileRef.current.offX = 0;
+          reconcileRef.current.offY = 0;
+        } else {
+          // Within tolerance: enqueue a small offset to nudge our prediction
+          // toward the server's view over subsequent frames.
+          reconcileRef.current.offX = dx;
+          reconcileRef.current.offY = dy;
+        }
+      }
+
+      // Bleed off the residual reconcile offset across the snake (~100ms time
+      // constant, matching INTERP_DELAY_MS).
+      if (reconcileRef.current.offX !== 0 || reconcileRef.current.offY !== 0) {
+        const blend = Math.min(1, delta * (1000 / INTERP_DELAY_MS));
+        const ax = reconcileRef.current.offX * blend;
+        const ay = reconcileRef.current.offY * blend;
+        for (const seg of localPlayerRef.current.segments) {
+          seg.x += ax;
+          seg.y += ay;
+        }
+        reconcileRef.current.offX -= ax;
+        reconcileRef.current.offY -= ay;
+        if (
+          Math.abs(reconcileRef.current.offX) < 0.001 &&
+          Math.abs(reconcileRef.current.offY) < 0.001
+        ) {
+          reconcileRef.current.offX = 0;
+          reconcileRef.current.offY = 0;
+        }
+      }
 
       // Local movement logic
       if (inputs.current.left || mobileInputs.left) localPlayerRef.current.currentAngle += TURN_SPEED * delta;

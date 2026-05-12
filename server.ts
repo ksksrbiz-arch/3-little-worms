@@ -10,6 +10,8 @@ import { createServer } from 'http';
 import { v4 as uuidv4 } from 'uuid';
 import type {
   GameState,
+  Player,
+  Orb,
   PlayerStateUpdatePayload,
   Snapshot,
   SnapshotPlayer,
@@ -26,11 +28,10 @@ import {
   INITIAL_LENGTH,
   SEGMENT_SPACING,
   TURN_SPEED,
+  BROADCAST_INTERVAL_MS,
   AOI_RADIUS,
-  SPATIAL_HASH_CELL_SIZE,
-  SNAPSHOT_RATE,
 } from './src/shared/types.ts';
-import { SpatialHash } from './src/server/SpatialHash.ts';
+import { buildSpatialHashes, type WorldHashes } from './src/server/SpatialHash.ts';
 import { encodeSnapshot } from './src/shared/wire.ts';
 import Stripe from 'stripe';
 
@@ -218,33 +219,26 @@ io.on('connection', (socket) => {
 import { updateBots } from './src/server/bots.ts';
 
 // ---------------------------------------------------------------------------
-// Game Loop — fixed-step accumulator with catch-up clamp (Step 1)
+// Game Loop — fixed-step simulation accumulator with catch-up clamp (Step 1),
+// followed by a separate broadcast loop at BROADCAST_INTERVAL_MS (~20 Hz).
 // ---------------------------------------------------------------------------
 //
-// The bare `setInterval` call below still fires roughly at TICK_RATE Hz, but
-// after a long event-loop stall (GC pause, sync work in another handler) we
-// must NOT try to catch up by replaying every missed step — that would
-// teleport snakes across the screen. Instead we clamp the simulation to at
-// most MAX_CATCHUP_STEPS fixed steps per wakeup; any leftover wall-clock
-// time is discarded with a warning.
+// The simulation `setInterval` still fires roughly at TICK_RATE Hz, but after
+// a long event-loop stall (GC pause, sync work in another handler) we must
+// NOT try to catch up by replaying every missed step — that would teleport
+// snakes across the screen. Instead we clamp to at most MAX_CATCHUP_STEPS
+// fixed steps per wakeup; any leftover wall-clock time is discarded with a
+// rate-limited warning.
 const TICK_INTERVAL_MS = 1000 / TICK_RATE;
 const FIXED_DT = TICK_INTERVAL_MS / 1000; // seconds per simulation step
 const MAX_CATCHUP_STEPS = 3;
-// Server runs simulation at TICK_RATE but emits snapshots at the lower
-// SNAPSHOT_RATE; clients interpolate between snapshots. ticksPerSnapshot
-// is rounded so 60Hz / 20Hz → emit every 3rd tick.
-const TICKS_PER_SNAPSHOT = Math.max(1, Math.round(TICK_RATE / SNAPSHOT_RATE));
 let tickAccumulatorMs = 0;
 let lastTickWallMs = Date.now();
 let tickSeq = 0;
 let lastCatchupWarnMs = 0;
+let latestHashes: WorldHashes = buildSpatialHashes(state);
 
 function runSimulationStep(dt: number) {
-  // (Step 3 placeholder) Resample most-recent input for any opted-in client
-  // and step their snake here. Until the client opts in we still run the
-  // existing client-authoritative path via `update_state`, so the body of
-  // this function only owns shared world updates.
-
   // Update players (just for boosting orb drops)
   for (const id in state.players) {
     const player = state.players[id];
@@ -256,8 +250,12 @@ function runSimulationStep(dt: number) {
     }
   }
 
+  // Build per-tick spatial hashes once and share with the AI pass and the
+  // broadcast loop's AOI queries.
+  latestHashes = buildSpatialHashes(state);
+
   // AI Bots Update
-  updateBots(state, dt, spawnOrb);
+  updateBots(state, dt, spawnOrb, latestHashes);
 
   // Spawn random orbs
   if (Math.random() < 0.2) {
@@ -289,56 +287,33 @@ function runSimulationStep(dt: number) {
       }
     }
   }
+
+  // Update leaderboard
+  state.leaderboard = Object.values(state.players)
+    .filter(p => p.state === 'alive')
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 10)
+    .map(p => ({ id: p.id, name: p.name, score: Math.floor(p.score), color: p.color }));
 }
 
 // ---------------------------------------------------------------------------
-// AOI snapshot construction (Step 2) — uses SpatialHash to send each socket
-// only the entities inside its viewport (+ buffer).
+// Binary AOI snapshot construction (Step 6 wire format) — reuses the
+// per-tick spatial hashes so we don't rebuild them per-socket.
 // ---------------------------------------------------------------------------
-type HashedPlayerSeg = { id: string; x: number; y: number };
-type HashedOrb = { id: string };
-type HashedHazard = { id: string };
-
-function buildSpatialHashes() {
-  const playerSegHash = new SpatialHash<HashedPlayerSeg>(SPATIAL_HASH_CELL_SIZE);
-  const orbHash = new SpatialHash<HashedOrb>(SPATIAL_HASH_CELL_SIZE);
-  const hazardHash = new SpatialHash<HashedHazard>(SPATIAL_HASH_CELL_SIZE);
-
-  for (const id in state.players) {
-    const p = state.players[id];
-    if (p.state !== 'alive') continue;
-    for (const seg of p.segments) {
-      playerSegHash.insert(seg.x, seg.y, { id, x: seg.x, y: seg.y });
-    }
-  }
-  for (const orbId in state.orbs) {
-    const o = state.orbs[orbId];
-    orbHash.insert(o.x, o.y, { id: orbId });
-  }
-  for (const hazId in state.hazards) {
-    const h = state.hazards[hazId];
-    hazardHash.insert(h.x, h.y, { id: hazId });
-  }
-  return { playerSegHash, orbHash, hazardHash };
-}
-
 function buildSnapshotForSocket(
   socketId: string,
-  hashes: ReturnType<typeof buildSpatialHashes>,
+  hashes: WorldHashes,
   serverTimeMs: number,
   currentTickSeq: number,
 ): Snapshot {
   const self = state.players[socketId];
-  // Center the AOI on the player's head; if the player isn't joined/alive,
-  // center on (0,0) so spectators still receive a useful slice of the world.
   const headX = self?.segments[0]?.x ?? 0;
   const headY = self?.segments[0]?.y ?? 0;
 
-  // Collect *unique* player ids whose any segment falls inside the AOI.
+  // Players inside the AOI: any player with at least one segment in range.
   const playerIds = new Set<string>();
-  // Always include self if joined, even if their head somehow rounded outside.
   if (self) playerIds.add(socketId);
-  for (const hit of hashes.playerSegHash.query(headX, headY, AOI_RADIUS)) {
+  for (const hit of hashes.segmentHash.query(headX, headY, AOI_RADIUS)) {
     playerIds.add(hit.id);
   }
 
@@ -366,12 +341,14 @@ function buildSnapshotForSocket(
     if (o) orbs.push({ id: o.id, x: o.x, y: o.y, value: o.value, color: o.color });
   }
 
-  const hazardIds = new Set<string>();
-  for (const hit of hashes.hazardHash.query(headX, headY, AOI_RADIUS)) hazardIds.add(hit.id);
   const hazards: SnapshotHazard[] = [];
-  for (const hid of hazardIds) {
-    const h = state.hazards[hid];
-    if (h) hazards.push({ id: h.id, x: h.x, y: h.y, radius: h.radius, state: h.state, timeLeft: h.timeLeft });
+  for (const hazId in state.hazards) {
+    const h = state.hazards[hazId];
+    const dx = h.x - headX;
+    const dy = h.y - headY;
+    if (dx * dx + dy * dy < (AOI_RADIUS + h.radius) * (AOI_RADIUS + h.radius)) {
+      hazards.push({ id: h.id, x: h.x, y: h.y, radius: h.radius, state: h.state, timeLeft: h.timeLeft });
+    }
   }
 
   const rt = clientRuntime.get(socketId);
@@ -406,54 +383,92 @@ setInterval(() => {
     tickAccumulatorMs = maxAccumMs;
   }
 
-  let stepsRun = 0;
-  while (tickAccumulatorMs >= TICK_INTERVAL_MS && stepsRun < MAX_CATCHUP_STEPS) {
+  while (tickAccumulatorMs >= TICK_INTERVAL_MS) {
     runSimulationStep(FIXED_DT);
     tickAccumulatorMs -= TICK_INTERVAL_MS;
-    stepsRun++;
     tickSeq = (tickSeq + 1) >>> 0;
   }
-  if (stepsRun === 0) return; // not enough wall-clock has passed yet
+}, TICK_INTERVAL_MS);
 
-  // Update leaderboard once per wakeup (it only depends on final state).
-  state.leaderboard = Object.values(state.players)
-    .filter(p => p.state === 'alive')
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 10)
-    .map(p => ({ id: p.id, name: p.name, score: Math.floor(p.score), color: p.color }));
-
+// Broadcast loop — emits a per-socket area-of-interest payload at ~20 Hz.
+// Other snakes are always included so cross-world collisions/leaderboard work
+// even when players are far apart; orbs and hazards (the bulk of the bandwidth
+// in a populated world) are filtered to within AOI_RADIUS of each player's
+// head. Spectators / not-yet-joined sockets get a leaderboard-only payload.
+// Each socket also receives a binary `snap` frame (Step 6) for clients that
+// have migrated to the new wire format; legacy clients keep consuming `state`.
+setInterval(() => {
   if (io.engine.clientsCount === 0) return;
 
-  // Build per-socket AOI snapshots once per wakeup. The spatial hash is
-  // built once and shared across all sockets so cost is O(N + S·k) rather
-  // than O(N·S). Snapshots are throttled to SNAPSHOT_RATE; clients are
-  // expected to interpolate between snapshots.
-  const shouldEmitSnapshots = (tickSeq % TICKS_PER_SNAPSHOT) === 0;
-  const hashes = shouldEmitSnapshots ? buildSpatialHashes() : null;
-  setImmediate(() => {
-    // Emit the legacy global broadcast first so it isn't dropped by
-    // back-pressure behind the per-socket binary snap loop. Existing
-    // clients (and the e2e tests in tests/e2e/multiplayer.spec.ts) listen
-    // for this `state` event; the migration to `snap` is incremental.
-    io.volatile.emit('state', state);
-    if (!hashes) return;
-    for (const [sid, sock] of io.sockets.sockets) {
-      const snap = buildSnapshotForSocket(sid, hashes, nowServer, tickSeq);
+  // Pre-compute the alive-player snapshot once per broadcast — this is the
+  // same set every recipient sees so we can share the object reference.
+  const alivePlayers: Record<string, Player> = {};
+  for (const id in state.players) {
+    const p = state.players[id];
+    if (p.state === 'alive') {
+      alivePlayers[id] = p;
+    }
+  }
+
+  const nowServer = Date.now();
+  const sockets = io.sockets.sockets;
+  for (const [, socket] of sockets) {
+    const self = state.players[socket.id];
+    if (!self || self.state !== 'alive' || self.segments.length === 0) {
+      // Spectator / pre-join: send a minimal payload so the leaderboard works.
+      socket.volatile.emit('state', {
+        players: alivePlayers,
+        orbs: {},
+        leaderboard: state.leaderboard,
+        hazards: {},
+      } as GameState);
+      // Still ship a binary `snap` (without a self) so clients on the new
+      // wire path see the alive-player list and can render the leaderboard.
       try {
-        const buf = encodeSnapshot(snap);
-        // Note: socket.io's `volatile` channel silently drops binary frames
-        // in some configurations, so we use a regular emit here. The
-        // SNAPSHOT_RATE throttle (~20Hz) keeps bandwidth reasonable on its
-        // own — at AOI sizes seen in practice each frame is only a few KB.
-        sock.emit('snap', buf);
+        const snap = buildSnapshotForSocket(socket.id, latestHashes, nowServer, tickSeq);
+        socket.emit('snap', encodeSnapshot(snap));
       } catch (err) {
-        // Encoding should never throw for well-formed state; log once and skip.
-        console.warn('Failed to encode snapshot for socket', sid, err);
+        console.warn('Failed to encode snapshot for socket', socket.id, err);
+      }
+      continue;
+    }
+
+    const head = self.segments[0];
+    const nearbyOrbs: Record<string, Orb> = {};
+    for (const orb of latestHashes.orbHash.query(head.x, head.y, AOI_RADIUS)) {
+      const o = state.orbs[orb.id];
+      if (o) nearbyOrbs[orb.id] = o;
+    }
+
+    const nearbyHazards: GameState['hazards'] = {};
+    for (const hazId in state.hazards) {
+      const haz = state.hazards[hazId];
+      const dx = haz.x - head.x;
+      const dy = haz.y - head.y;
+      // Include hazards whose blast area touches the AOI ring.
+      if (dx * dx + dy * dy < (AOI_RADIUS + haz.radius) * (AOI_RADIUS + haz.radius)) {
+        nearbyHazards[hazId] = haz;
       }
     }
-  });
 
-}, TICK_INTERVAL_MS);
+    socket.volatile.emit('state', {
+      players: alivePlayers,
+      orbs: nearbyOrbs,
+      leaderboard: state.leaderboard,
+      hazards: nearbyHazards,
+    } as GameState);
+
+    // Binary `snap` (Step 6). Note: `socket.volatile.emit` silently drops
+    // binary frames in this socket.io v4 setup, so we use plain `socket.emit`
+    // and rely on the BROADCAST_INTERVAL_MS throttle for back-pressure.
+    try {
+      const snap = buildSnapshotForSocket(socket.id, latestHashes, nowServer, tickSeq);
+      socket.emit('snap', encodeSnapshot(snap));
+    } catch (err) {
+      console.warn('Failed to encode snapshot for socket', socket.id, err);
+    }
+  }
+}, BROADCAST_INTERVAL_MS);
 
 async function startServer() {
   app.get('/api/health', (req, res) => {

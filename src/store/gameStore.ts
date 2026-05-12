@@ -5,7 +5,14 @@
 
 import { create } from 'zustand';
 import { io, Socket } from 'socket.io-client';
-import { GameState, INITIAL_LENGTH, Player, PlayerStateUpdatePayload, SEGMENT_SPACING } from '../shared/types';
+import {
+  GameState,
+  INITIAL_LENGTH,
+  Player,
+  PlayerStateUpdatePayload,
+  Point,
+  SEGMENT_SPACING,
+} from '../shared/types';
 
 interface GameStore {
   socket: Socket | null;
@@ -20,6 +27,35 @@ interface GameStore {
 
 export const globalGameState: { current: GameState | null } = { current: null };
 export const mobileInputs = { left: false, right: false, boost: false };
+
+/**
+ * Snapshot buffer for client-side prediction / interpolation. The render loop
+ * (GameScene) consumes the latest server-authoritative head position for the
+ * local player to perform "lenient validation" reconciliation:
+ *   - If server head is within RECONCILE_SNAP_THRESHOLD of the predicted head
+ *     it is smoothly nudged toward the server position.
+ *   - Otherwise the prediction is snapped to the server position.
+ *
+ * `seq` is bumped on every received snapshot so consumers can detect that a
+ * fresh snapshot arrived without subscribing to the socket.
+ */
+export type Snapshot = {
+  receivedAt: number;
+  state: GameState;
+};
+export const snapshotBuffer: { prev: Snapshot | null; latest: Snapshot | null; seq: number } = {
+  prev: null,
+  latest: null,
+  seq: 0,
+};
+export const localServerView: {
+  seq: number;
+  head: Point | null;
+  segments: Point[] | null;
+  currentAngle: number | null;
+  score: number | null;
+} = { seq: 0, head: null, segments: null, currentAngle: null, score: null };
+
 // Keep optimistic joins light enough for mobile/parallel E2E while still showing nearby collectibles.
 const MAX_OPTIMISTIC_ORBS = 150;
 let lastUiUpdate = 0;
@@ -91,6 +127,22 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     socket.on('state', (state: GameState) => {
       const currentId = get().playerId;
+      const now = Date.now();
+
+      // Capture server-authoritative view of the local player BEFORE we
+      // overwrite it with the optimistic snapshot below. GameScene uses this
+      // for lenient-validation reconciliation against its predicted head.
+      if (currentId) {
+        const serverSelf = state.players[currentId];
+        if (serverSelf && serverSelf.state === 'alive' && serverSelf.segments.length > 0) {
+          localServerView.seq++;
+          localServerView.head = { x: serverSelf.segments[0].x, y: serverSelf.segments[0].y };
+          localServerView.segments = serverSelf.segments.map(s => ({ x: s.x, y: s.y }));
+          localServerView.currentAngle = serverSelf.currentAngle;
+          localServerView.score = serverSelf.score;
+        }
+      }
+
       if (currentId && !state.players[currentId]) {
         const currentPlayer = get().gameState?.players[currentId] || createLocalPlayer(currentId, lastJoinOptions);
         state = {
@@ -99,8 +151,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
           orbs: limitOptimisticOrbs(state.orbs),
         };
       }
+
+      // Slide the snapshot buffer (prev, latest) for interpolation/reconciliation.
+      snapshotBuffer.prev = snapshotBuffer.latest;
+      snapshotBuffer.latest = { receivedAt: now, state };
+      snapshotBuffer.seq++;
+
       globalGameState.current = state;
-      const now = Date.now();
       if (now - lastUiUpdate > 100) { // Throttle React updates to 10Hz
         set({ gameState: state });
         lastUiUpdate = now;
