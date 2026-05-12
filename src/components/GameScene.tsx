@@ -21,8 +21,7 @@ import { useUserStore } from '../store/userStore';
 import { audioManager } from '../lib/audio';
 import { getCachedTexture } from '../lib/textureCache';
 
-// Run client prediction at 60 FPS while capping large frame gaps to avoid catch-up spirals.
-const TARGET_FRAME_TIME = 1 / 60;
+// Clamp long frames so gameplay stays responsive without huge one-frame jumps after hitches.
 const MAX_FRAME_DELTA = 1 / 30;
 const ORB_COLLECT_RADIUS_SQ = 4;
 const PLAYER_COLLISION_RADIUS_SQ = 2.25;
@@ -78,7 +77,6 @@ export function GameScene({ gameState, playerId, sendPlayerState, sendCollectOrb
   const isNarrowView = size.width < 640;
   const inputs = useRef({ left: false, right: false, boost: false });
   const lightRef = useRef<THREE.DirectionalLight>(null);
-  const frameAccumulator = useRef(0);
   const [lightTarget] = useState(() => new THREE.Object3D());
 
   const localPlayerRef = useRef<{
@@ -149,11 +147,7 @@ export function GameScene({ gameState, playerId, sendPlayerState, sendCollectOrb
   }, []);
 
   useFrame((state, rawDelta) => {
-    // Accumulate variable render time and advance movement in fixed 60 FPS steps.
-    frameAccumulator.current += Math.min(rawDelta, MAX_FRAME_DELTA);
-    if (frameAccumulator.current < TARGET_FRAME_TIME) return;
-    const delta = TARGET_FRAME_TIME;
-    frameAccumulator.current = Math.max(0, frameAccumulator.current - TARGET_FRAME_TIME);
+    const delta = Math.min(rawDelta, MAX_FRAME_DELTA);
 
     const gs = globalGameState.current;
     if (!gs || !playerId) return;
