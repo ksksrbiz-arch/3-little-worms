@@ -23,7 +23,10 @@ import {
   INITIAL_LENGTH,
   SEGMENT_SPACING,
   TURN_SPEED,
+  BROADCAST_INTERVAL_MS,
+  AOI_RADIUS,
 } from './src/shared/types.ts';
+import { buildSpatialHashes, type WorldHashes } from './src/server/SpatialHash.ts';
 import Stripe from 'stripe';
 
 const app = express();
@@ -179,8 +182,11 @@ io.on('connection', (socket) => {
 
 import { updateBots } from './src/server/bots.ts';
 
-// Game Loop
+// Game Loop — simulation runs at TICK_RATE; broadcasts run on a separate
+// interval at BROADCAST_INTERVAL_MS (~20 Hz) per Slither.io-style throttling.
 let lastTimeServer = Date.now();
+let latestHashes: WorldHashes = buildSpatialHashes(state);
+
 setInterval(() => {
   const nowServer = Date.now();
   const delta = (nowServer - lastTimeServer) / 1000;
@@ -197,8 +203,12 @@ setInterval(() => {
     }
   }
 
+  // Build per-tick spatial hashes once and share with the AI pass and the
+  // broadcast loop's AOI queries.
+  latestHashes = buildSpatialHashes(state);
+
   // AI Bots Update
-  updateBots(state, delta, spawnOrb);
+  updateBots(state, delta, spawnOrb, latestHashes);
 
   // Spawn random orbs
   if (Math.random() < 0.2) {
@@ -238,14 +248,66 @@ setInterval(() => {
     .slice(0, 10)
     .map(p => ({ id: p.id, name: p.name, score: Math.floor(p.score), color: p.color }));
 
-  // Broadcast state async and volatile to prevent queue backup and UI freezes
-  if (io.engine.clientsCount > 0) {
-    setImmediate(() => {
-      io.volatile.emit('state', state);
-    });
+}, 1000 / TICK_RATE);
+
+// Broadcast loop — emits a per-socket area-of-interest payload at ~20 Hz.
+// Other snakes are always included so cross-world collisions/leaderboard work
+// even when players are far apart; orbs and hazards (the bulk of the bandwidth
+// in a populated world) are filtered to within AOI_RADIUS of each player's
+// head. Spectators / not-yet-joined sockets get a leaderboard-only payload.
+setInterval(() => {
+  if (io.engine.clientsCount === 0) return;
+
+  // Pre-compute the alive-player snapshot once per broadcast — this is the
+  // same set every recipient sees so we can share the object reference.
+  const alivePlayers: Record<string, Player> = {};
+  for (const id in state.players) {
+    const p = state.players[id];
+    if (p.state === 'alive') {
+      alivePlayers[id] = p;
+    }
   }
 
-}, 1000 / TICK_RATE);
+  const sockets = io.sockets.sockets;
+  for (const [, socket] of sockets) {
+    const self = state.players[socket.id];
+    if (!self || self.state !== 'alive' || self.segments.length === 0) {
+      // Spectator / pre-join: send a minimal payload so the leaderboard works.
+      socket.volatile.emit('state', {
+        players: alivePlayers,
+        orbs: {},
+        leaderboard: state.leaderboard,
+        hazards: {},
+      } as GameState);
+      continue;
+    }
+
+    const head = self.segments[0];
+    const nearbyOrbs: Record<string, Orb> = {};
+    for (const orb of latestHashes.orbHash.query(head.x, head.y, AOI_RADIUS)) {
+      const o = state.orbs[orb.id];
+      if (o) nearbyOrbs[orb.id] = o;
+    }
+
+    const nearbyHazards: GameState['hazards'] = {};
+    for (const hazId in state.hazards) {
+      const haz = state.hazards[hazId];
+      const dx = haz.x - head.x;
+      const dy = haz.y - head.y;
+      // Include hazards whose blast area touches the AOI ring.
+      if (dx * dx + dy * dy < (AOI_RADIUS + haz.radius) * (AOI_RADIUS + haz.radius)) {
+        nearbyHazards[hazId] = haz;
+      }
+    }
+
+    socket.volatile.emit('state', {
+      players: alivePlayers,
+      orbs: nearbyOrbs,
+      leaderboard: state.leaderboard,
+      hazards: nearbyHazards,
+    } as GameState);
+  }
+}, BROADCAST_INTERVAL_MS);
 
 async function startServer() {
   app.get('/api/health', (req, res) => {
