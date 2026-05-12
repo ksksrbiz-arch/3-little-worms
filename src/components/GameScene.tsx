@@ -11,6 +11,7 @@ import {
   TURN_SPEED,
   BOOST_SPEED,
   BASE_SPEED,
+  INTERP_DELAY_MS,
   RECONCILE_SNAP_THRESHOLD,
   type GameState,
   type Point,
@@ -228,7 +229,7 @@ export function GameScene({ gameState, playerId, sendPlayerState, sendCollectOrb
       // Bleed off the residual reconcile offset across the snake (~100ms time
       // constant, matching INTERP_DELAY_MS).
       if (reconcileRef.current.offX !== 0 || reconcileRef.current.offY !== 0) {
-        const blend = Math.min(1, delta * 10);
+        const blend = Math.min(1, delta * (1000 / INTERP_DELAY_MS));
         const ax = reconcileRef.current.offX * blend;
         const ay = reconcileRef.current.offY * blend;
         for (const seg of localPlayerRef.current.segments) {
