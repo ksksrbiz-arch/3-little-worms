@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { GameState } from '../shared/types.ts';
 import { WORLD_SIZE, INITIAL_LENGTH, SEGMENT_SPACING, TURN_SPEED, BASE_SPEED, BOOST_SPEED } from '../shared/types.ts';
-import type { WorldHashes } from './SpatialHash.ts';
+import { SpatialHash } from './SpatialHash.ts';
 
 const COLORS = [
   '#ff7eb3', '#ffb86c', '#f1fa8c', '#50fa7b', '#8be9fd', '#bd93f9',
@@ -16,23 +16,32 @@ interface BotAI {
 export const botsAI: Record<string, BotAI> = {};
 const TARGET_BOTS = 15;
 
-export function updateBots(
-  state: GameState,
-  delta: number,
-  spawnOrb: (x: number, y: number, v: number, c: string, f: boolean) => void,
-  hashes: WorldHashes,
-) {
+export function updateBots(state: GameState, delta: number, spawnOrb: (x: number, y: number, v: number, c: string, f: boolean) => void) {
   let aliveBots = 0;
-
-  // Spatial hashes are built once per simulation tick in server.ts and shared
-  // with this AI pass and the per-socket AOI broadcaster.
-  const { playerHeadHash: playerHash, segmentHash, orbHash } = hashes;
-
+  
+  // Build spatial hashes for this tick
+  const cellGridSize = 20; // 20 units per cell
+  const playerHash = new SpatialHash<{id: string, score: number, segments: {x:number, y:number}[]}>(cellGridSize);
+  const segmentHash = new SpatialHash<{id: string, x: number, y: number}>(5); // Fine grid for collision (1.5 radius)
+  const orbHash = new SpatialHash<{id: string, x: number, y: number}>(cellGridSize);
+  
   for (const id in state.players) {
     const p = state.players[id];
-    if (p.state === 'alive' && p.segments.length > 0 && p.isBot) {
-      aliveBots++;
+    if (p.state === 'alive' && p.segments.length > 0) {
+      if (p.isBot) aliveBots++;
+      
+      const head = p.segments[0];
+      playerHash.insert(head.x, head.y, { id, score: p.score, segments: p.segments });
+      
+      for (const seg of p.segments) {
+        segmentHash.insert(seg.x, seg.y, { id, x: seg.x, y: seg.y });
+      }
     }
+  }
+  
+  for (const orbId in state.orbs) {
+    const orb = state.orbs[orbId];
+    orbHash.insert(orb.x, orb.y, { id: orbId, x: orb.x, y: orb.y });
   }
 
   // Spawn bots

@@ -5,18 +5,8 @@
 
 import { useEffect, useRef, useState, useMemo } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
-import { globalGameState, mobileInputs, localServerView } from '../store/gameStore';
-import {
-  WORLD_SIZE,
-  TURN_SPEED,
-  BOOST_SPEED,
-  BASE_SPEED,
-  INTERP_DELAY_MS,
-  RECONCILE_SNAP_THRESHOLD,
-  type GameState,
-  type Point,
-  type PlayerStateUpdatePayload,
-} from '../shared/types';
+import { useGameStore, globalGameState, mobileInputs } from '../store/gameStore';
+import { WORLD_SIZE, TURN_SPEED, BOOST_SPEED, BASE_SPEED } from '../shared/types';
 import * as THREE from 'three';
 import { Sphere, Grid } from '@react-three/drei';
 
@@ -29,14 +19,6 @@ import { localCollectedOrbs } from './game/utils';
 
 import { useUserStore } from '../store/userStore';
 import { audioManager } from '../lib/audio';
-import { getCachedTexture } from '../lib/textureCache';
-
-// Clamp long frames so gameplay stays responsive without huge one-frame jumps after hitches.
-const MAX_FRAME_DELTA = 1 / 30;
-const ORB_COLLECT_RADIUS_SQ = 4;
-const PLAYER_COLLISION_RADIUS_SQ = 2.25;
-const MIN_LENGTH = 10;
-const HAZARD_COLLISION_PADDING = 0.8;
 
 const THEMES: Record<string, { bg: string, cell: string, section: string }> = {
   default: { bg: '#0a0a0a', cell: '#1e3a8a', section: '#3b82f6' },
@@ -45,53 +27,17 @@ const THEMES: Record<string, { bg: string, cell: string, section: string }> = {
   synthwave: { bg: '#0f0524', cell: '#7c3aed', section: '#f472b6' }
 };
 
-type GameSceneProps = {
-  gameState: GameState | null;
-  playerId: string | null;
-  sendPlayerState: (data: PlayerStateUpdatePayload) => void;
-  sendCollectOrb: (orbId: string) => void;
-};
-
-function distanceSquared(a: Point, b: Point) {
-  const dx = a.x - b.x;
-  const dy = a.y - b.y;
-  return dx * dx + dy * dy;
-}
-
-function clampToBoundary(point: Point, boundary: number) {
-  return {
-    x: Math.max(-boundary, Math.min(boundary, point.x)),
-    y: Math.max(-boundary, Math.min(boundary, point.y)),
-  };
-}
-
-function createPlayerStatePayload(
-  segments: Point[],
-  score: number,
-  currentAngle: number,
-  isBoosting: boolean,
-  state: PlayerStateUpdatePayload['state']
-): PlayerStateUpdatePayload {
-  return {
-    segments,
-    score,
-    currentAngle,
-    isBoosting,
-    state,
-  };
-}
-
-export function GameScene({ gameState, playerId, sendPlayerState, sendCollectOrb }: GameSceneProps) {
+export function GameScene() {
+  const { gameState, playerId, sendPlayerState, sendCollectOrb } = useGameStore();
   const { profile } = useUserStore();
-  const { camera, size } = useThree();
-  const isNarrowView = size.width < 640;
+  const { camera } = useThree();
   const inputs = useRef({ left: false, right: false, boost: false });
   const lightRef = useRef<THREE.DirectionalLight>(null);
   const [lightTarget] = useState(() => new THREE.Object3D());
 
   const localPlayerRef = useRef<{
     active: boolean;
-    segments: Point[];
+    segments: {x: number, y: number}[];
     score: number;
     currentAngle: number;
     isBoosting: boolean;
@@ -106,35 +52,6 @@ export function GameScene({ gameState, playerId, sendPlayerState, sendCollectOrb
     wasBoosting: false,
     lastSendTime: 0,
   });
-
-  // Lenient-validation reconciliation: track the server snapshot we've already
-  // applied so we only reconcile once per snapshot, plus a residual offset
-  // that we decay over ~100ms when the server head is close to ours.
-  const reconcileRef = useRef<{ consumedSeq: number; offX: number; offY: number }>({
-    consumedSeq: 0,
-    offX: 0,
-    offY: 0,
-  });
-
-  const getCameraZ = (score: number) => {
-    if (isNarrowView) {
-      return Math.min(70, Math.max(38, 34 + score * 0.35));
-    }
-    return Math.min(45, Math.max(20, 20 + score * 0.2));
-  };
-
-  useEffect(() => {
-    globalGameState.current = gameState;
-  }, [gameState]);
-
-  useEffect(() => {
-    const player = playerId && gameState ? gameState.players[playerId] : null;
-    const head = player?.state === 'alive' ? player.segments[0] : null;
-    if (!player || !head) return;
-
-    camera.position.set(head.x, head.y, getCameraZ(player.score));
-    camera.lookAt(head.x, head.y, 0);
-  }, [camera, gameState, isNarrowView, playerId]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -165,9 +82,7 @@ export function GameScene({ gameState, playerId, sendPlayerState, sendCollectOrb
     };
   }, []);
 
-  useFrame((state, rawDelta) => {
-    const delta = Math.min(rawDelta, MAX_FRAME_DELTA);
-
+  useFrame((state, delta) => {
     const gs = globalGameState.current;
     if (!gs || !playerId) return;
     
@@ -180,72 +95,9 @@ export function GameScene({ gameState, playerId, sendPlayerState, sendCollectOrb
         localPlayerRef.current.segments = [...serverPlayer.segments];
         localPlayerRef.current.score = serverPlayer.score;
         localPlayerRef.current.currentAngle = serverPlayer.currentAngle;
-        const head = serverPlayer.segments[0];
-        camera.position.set(head.x, head.y, getCameraZ(serverPlayer.score));
-        camera.lookAt(head.x, head.y, 0);
       }
 
       if (!localPlayerRef.current.active) return;
-
-      // Lenient-validation reconciliation: when a fresh server snapshot has
-      // arrived, compare its head position to our predicted head. Snap if the
-      // discrepancy is large, otherwise schedule a smooth correction over the
-      // next ~100ms so motion stays fluid and "tight" like Slither.io.
-      if (
-        localServerView.seq !== reconcileRef.current.consumedSeq &&
-        localServerView.head &&
-        localPlayerRef.current.segments.length > 0
-      ) {
-        reconcileRef.current.consumedSeq = localServerView.seq;
-        const predHead = localPlayerRef.current.segments[0];
-        const dx = localServerView.head.x - predHead.x;
-        const dy = localServerView.head.y - predHead.y;
-        const distSq = dx * dx + dy * dy;
-        if (distSq > RECONCILE_SNAP_THRESHOLD * RECONCILE_SNAP_THRESHOLD) {
-          // Hard snap: trust the server. Replace local segments with the
-          // server-authoritative chain and clear any pending residual offset.
-          if (localServerView.segments && localServerView.segments.length > 0) {
-            localPlayerRef.current.segments = localServerView.segments.map((s) => ({
-              x: s.x,
-              y: s.y,
-            }));
-          }
-          if (localServerView.currentAngle !== null) {
-            localPlayerRef.current.currentAngle = localServerView.currentAngle;
-          }
-          if (localServerView.score !== null) {
-            localPlayerRef.current.score = localServerView.score;
-          }
-          reconcileRef.current.offX = 0;
-          reconcileRef.current.offY = 0;
-        } else {
-          // Within tolerance: enqueue a small offset to nudge our prediction
-          // toward the server's view over subsequent frames.
-          reconcileRef.current.offX = dx;
-          reconcileRef.current.offY = dy;
-        }
-      }
-
-      // Bleed off the residual reconcile offset across the snake (~100ms time
-      // constant, matching INTERP_DELAY_MS).
-      if (reconcileRef.current.offX !== 0 || reconcileRef.current.offY !== 0) {
-        const blend = Math.min(1, delta * (1000 / INTERP_DELAY_MS));
-        const ax = reconcileRef.current.offX * blend;
-        const ay = reconcileRef.current.offY * blend;
-        for (const seg of localPlayerRef.current.segments) {
-          seg.x += ax;
-          seg.y += ay;
-        }
-        reconcileRef.current.offX -= ax;
-        reconcileRef.current.offY -= ay;
-        if (
-          Math.abs(reconcileRef.current.offX) < 0.001 &&
-          Math.abs(reconcileRef.current.offY) < 0.001
-        ) {
-          reconcileRef.current.offX = 0;
-          reconcileRef.current.offY = 0;
-        }
-      }
 
       // Local movement logic
       if (inputs.current.left || mobileInputs.left) localPlayerRef.current.currentAngle += TURN_SPEED * delta;
@@ -258,17 +110,20 @@ export function GameScene({ gameState, playerId, sendPlayerState, sendCollectOrb
       head.x += Math.cos(localPlayerRef.current.currentAngle) * speed * delta;
       head.y += Math.sin(localPlayerRef.current.currentAngle) * speed * delta;
 
-      const boundedHead = clampToBoundary(head, WORLD_SIZE / 2);
-      head.x = boundedHead.x;
-      head.y = boundedHead.y;
+      // Boundary check
+      const boundary = WORLD_SIZE / 2;
+      if (head.x < -boundary) head.x = -boundary;
+      if (head.x > boundary) head.x = boundary;
+      if (head.y < -boundary) head.y = -boundary;
+      if (head.y > boundary) head.y = boundary;
 
       localPlayerRef.current.segments.unshift(head);
 
       if (localPlayerRef.current.isBoosting) {
         localPlayerRef.current.score -= 2 * delta;
-        if (localPlayerRef.current.score <= MIN_LENGTH) {
+        if (localPlayerRef.current.score <= 10) {
           localPlayerRef.current.isBoosting = false;
-          localPlayerRef.current.score = MIN_LENGTH;
+          localPlayerRef.current.score = 10;
         }
       }
 
@@ -281,7 +136,9 @@ export function GameScene({ gameState, playerId, sendPlayerState, sendCollectOrb
       for (const orbId in gs.orbs) {
         if (localCollectedOrbs.has(orbId)) continue;
         const orb = gs.orbs[orbId];
-        if (distanceSquared(head, orb) < ORB_COLLECT_RADIUS_SQ) {
+        const dx = head.x - orb.x;
+        const dy = head.y - orb.y;
+        if (dx * dx + dy * dy < 4) {
           localPlayerRef.current.score += orb.value;
           localCollectedOrbs.add(orbId);
           delete gs.orbs[orbId]; // predict locally
@@ -305,7 +162,9 @@ export function GameScene({ gameState, playerId, sendPlayerState, sendCollectOrb
         const other = gs.players[otherId];
         if (other.state !== 'alive') continue;
         for (const seg of other.segments) {
-          if (distanceSquared(head, seg) < PLAYER_COLLISION_RADIUS_SQ) {
+          const dx = head.x - seg.x;
+          const dy = head.y - seg.y;
+          if (dx * dx + dy * dy < 2.25) {
             collided = true;
             break;
           }
@@ -317,10 +176,11 @@ export function GameScene({ gameState, playerId, sendPlayerState, sendCollectOrb
         for (const hazId in gs.hazards) {
           const haz = gs.hazards[hazId];
           if (haz.state === 'active') {
-            const hazardCollisionRadius = haz.radius + HAZARD_COLLISION_PADDING;
-            if (distanceSquared(head, haz) < hazardCollisionRadius * hazardCollisionRadius) {
+            const dx = head.x - haz.x;
+            const dy = head.y - haz.y;
+            if (dx * dx + dy * dy < (haz.radius + 0.8) * (haz.radius + 0.8)) {
               localPlayerRef.current.score -= 20 * delta;
-              if (localPlayerRef.current.score <= MIN_LENGTH) {
+              if (localPlayerRef.current.score <= 10) {
                 collided = true;
                 break;
               }
@@ -343,13 +203,13 @@ export function GameScene({ gameState, playerId, sendPlayerState, sendCollectOrb
         audioManager.playDeath();
         if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
         localPlayerRef.current.active = false;
-        sendPlayerState(createPlayerStatePayload(
-          localPlayerRef.current.segments,
-          localPlayerRef.current.score,
-          localPlayerRef.current.currentAngle,
-          false,
-          'dead'
-        ));
+        sendPlayerState({
+          segments: localPlayerRef.current.segments,
+          score: localPlayerRef.current.score,
+          currentAngle: localPlayerRef.current.currentAngle,
+          isBoosting: false,
+          state: 'dead'
+        });
         return;
       }
 
@@ -362,17 +222,17 @@ export function GameScene({ gameState, playerId, sendPlayerState, sendCollectOrb
       // Send state to server at 20Hz
       const now = Date.now();
       if (now - localPlayerRef.current.lastSendTime > 50) {
-        sendPlayerState(createPlayerStatePayload(
-          localPlayerRef.current.segments,
-          localPlayerRef.current.score,
-          localPlayerRef.current.currentAngle,
-          localPlayerRef.current.isBoosting,
-          'alive'
-        ));
+        sendPlayerState({
+          segments: localPlayerRef.current.segments,
+          score: localPlayerRef.current.score,
+          currentAngle: localPlayerRef.current.currentAngle,
+          isBoosting: localPlayerRef.current.isBoosting,
+          state: 'alive'
+        });
         localPlayerRef.current.lastSendTime = now;
       }
 
-      const targetZ = getCameraZ(localPlayerRef.current.score);
+      const targetZ = Math.min(45, Math.max(20, 20 + localPlayerRef.current.score * 0.2));
       
       // Smooth camera follow predicted head
       camera.position.x += (head.x - camera.position.x) * 10 * delta;
@@ -393,11 +253,12 @@ export function GameScene({ gameState, playerId, sendPlayerState, sendCollectOrb
   const activeTheme = profile?.theme && THEMES[profile.theme] ? THEMES[profile.theme] : THEMES.default;
   const customBgTexture = useMemo(() => {
     if (profile?.customBackground && profile.customBackground.startsWith('data:image')) {
-      return getCachedTexture(profile.customBackground, (tex) => {
-        tex.wrapS = THREE.RepeatWrapping;
-        tex.wrapT = THREE.RepeatWrapping;
-        tex.repeat.set(5, 5); // Tile the texture
-      });
+      const loader = new THREE.TextureLoader();
+      const tex = loader.load(profile.customBackground);
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(5, 5); // Tile the texture
+      return tex;
     }
     return null;
   }, [profile?.customBackground]);
@@ -446,27 +307,23 @@ export function GameScene({ gameState, playerId, sendPlayerState, sendCollectOrb
         />
       )}
 
-      {playerId && (
-        <>
-          <Orbs />
-          <DeathExplosions />
-          <BackgroundDust WORLD_SIZE={WORLD_SIZE} />
-          <Hazards />
+      <Orbs />
+      <DeathExplosions />
+      <BackgroundDust WORLD_SIZE={WORLD_SIZE} />
+      <Hazards />
 
-          {Object.values(gameState.players).map((player) => {
-            if (player.state !== 'alive' || player.segments.length === 0) return null;
-            return (
-              <Snake
-                key={player.id}
-                playerId={player.id}
-                color={player.color}
-                isLocal={player.id === playerId}
-                name={player.name}
-              />
-            );
-          })}
-        </>
-      )}
+      {Object.values(gameState.players).map((player) => {
+        if (player.state !== 'alive' || player.segments.length === 0) return null;
+        return (
+          <Snake
+            key={player.id}
+            playerId={player.id}
+            color={player.color}
+            isLocal={player.id === playerId}
+            name={player.name}
+          />
+        );
+      })}
     </>
   );
 }

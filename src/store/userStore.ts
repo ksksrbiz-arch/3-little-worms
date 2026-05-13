@@ -3,9 +3,6 @@ import { auth, db } from '../firebase';
 import { onAuthStateChanged, signInWithPopup, signOut as fbSignOut, User } from 'firebase/auth';
 import { googleProvider } from '../firebase';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { getCached, invalidateCached } from '../lib/dynamicCache';
-
-const PROFILE_CACHE_TTL_MS = 60_000;
 
 interface UserProfile {
   displayName: string;
@@ -43,9 +40,8 @@ export const useUserStore = create<UserStore>((set, get) => ({
     await fbSignOut(auth);
   },
   checkProfile: async (u: User) => {
-    const cacheKey = `profile:${u.uid}`;
     const ref = doc(db, 'users', u.uid);
-    const snap = await getCached(cacheKey, PROFILE_CACHE_TTL_MS, () => getDoc(ref));
+    const snap = await getDoc(ref);
     if (!snap.exists()) {
       const newProfile = {
         displayName: u.displayName || 'Player',
@@ -74,7 +70,6 @@ export const useUserStore = create<UserStore>((set, get) => ({
       ...newProfile,
       updatedAt: serverTimestamp(),
     }, { merge: true });
-    invalidateCached(`profile:${user.uid}`);
     set({ profile: newProfile });
   }
 }));

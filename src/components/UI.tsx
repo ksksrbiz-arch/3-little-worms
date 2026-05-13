@@ -7,27 +7,15 @@ import { useGameStore, mobileInputs } from '../store/gameStore';
 import { useUserStore } from '../store/userStore';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ExternalLink, Trophy, ArrowLeft, ArrowRight, Zap, User, Settings, LogOut, ShoppingCart, Sparkles } from 'lucide-react';
-import { lazy, Suspense, useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { db } from '../firebase';
 import { doc, setDoc, serverTimestamp, getDocs, collection, query, orderBy, limit } from 'firebase/firestore';
+import { Shop } from './Shop';
+import { AICreator } from './AICreator';
 import { audioManager } from '../lib/audio';
-import { getCached, invalidateCached } from '../lib/dynamicCache';
-
-const Shop = lazy(() => import('./Shop').then((module) => ({ default: module.Shop })));
-const AICreator = lazy(() => import('./AICreator').then((module) => ({ default: module.AICreator })));
-const LEADERBOARD_CACHE_KEY = 'leaderboard:top10';
-const LEADERBOARD_CACHE_TTL_MS = 30_000;
-
-function ModalFallback() {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-      <div className="h-10 w-10 rounded-full border-4 border-white/20 border-t-white animate-spin" />
-    </div>
-  );
-}
 
 export function UI() {
-  const { gameState, playerId, isConnected, joinGame } = useGameStore();
+  const { gameState, playerId, joinGame } = useGameStore();
 
   const player = playerId && gameState ? gameState.players[playerId] : null;
   const isAlive = player?.state === 'alive';
@@ -75,15 +63,21 @@ export function UI() {
     mobileInputs.right = false;
   };
 
+
+let leaderboardCache: { data: any[] | null, expires: number } = { data: null, expires: 0 };
+
   useEffect(() => {
     // Fetch global leaderboard
     const fetchLeaderboard = async () => {
       try {
-        const data = await getCached(LEADERBOARD_CACHE_KEY, LEADERBOARD_CACHE_TTL_MS, async () => {
-          const q = query(collection(db, 'leaderboard'), orderBy('score', 'desc'), limit(10));
-          const snap = await getDocs(q);
-          return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        });
+        if (Date.now() < leaderboardCache.expires && leaderboardCache.data) {
+          setGlobalLeaderboard(leaderboardCache.data);
+          return;
+        }
+        const q = query(collection(db, 'leaderboard'), orderBy('score', 'desc'), limit(10));
+        const snap = await getDocs(q);
+        const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        leaderboardCache = { data, expires: Date.now() + 30000 }; // 30s cache
         setGlobalLeaderboard(data);
       } catch (err) {
         console.error(err);
@@ -115,11 +109,12 @@ export function UI() {
   }, [user, profile]);
 
   const handleJoinGame = () => {
-    const options = profile
-      ? { name: profile.displayName, color: profile.skin === 'default' ? undefined : profile.skin }
-      : undefined;
-    window.requestAnimationFrame(() => audioManager.init());
-    window.requestAnimationFrame(() => joinGame(options));
+    audioManager.init();
+    if (profile) {
+      joinGame({ name: profile.displayName, color: profile.skin === 'default' ? undefined : profile.skin });
+    } else {
+      joinGame();
+    }
   };
 
   useEffect(() => {
@@ -133,16 +128,14 @@ export function UI() {
         name: player.name,
         color: player.color,
         createdAt: serverTimestamp(),
-      })
-        .then(() => invalidateCached(LEADERBOARD_CACHE_KEY))
-        .catch(err => {
-          const errInfo = {
-            error: err instanceof Error ? err.message : String(err),
-            operationType: 'create',
-            path: 'leaderboard'
-          };
-          console.error(JSON.stringify(errInfo));
-        });
+      }).catch(err => {
+        const errInfo = {
+          error: err instanceof Error ? err.message : String(err),
+          operationType: 'create',
+          path: 'leaderboard'
+        };
+        console.error(JSON.stringify(errInfo));
+      });
     }
   }, [isDead]);
 
@@ -163,15 +156,15 @@ export function UI() {
   }, []);
 
   return (
-    <div className="absolute inset-0 pointer-events-none flex flex-col justify-between p-3 sm:p-4 [padding-bottom:max(0.75rem,env(safe-area-inset-bottom))] [padding-top:max(0.75rem,env(safe-area-inset-top))]">
+    <div className="absolute inset-0 pointer-events-none flex flex-col justify-between p-4">
       {/* Top Bar */}
-      <div className="flex justify-between items-start gap-2 pointer-events-auto relative">
+      <div className="flex justify-between items-start pointer-events-auto relative">
         <div className="flex flex-col gap-2 z-10">
-          <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tighter leading-none" style={{ textShadow: '0 0 10px rgba(255,255,255,0.5)' }}>
+          <h1 className="text-3xl font-black text-white tracking-tighter" style={{ textShadow: '0 0 10px rgba(255,255,255,0.5)' }}>
             NEON.SNAKE
           </h1>
           {isAlive && (
-            <div className="text-base sm:text-xl font-mono text-white/80 font-bold">
+            <div className="text-xl font-mono text-white/80 font-bold">
               Length: {Math.floor(player.score)}
             </div>
           )}
@@ -190,10 +183,10 @@ export function UI() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 sm:gap-4 z-10">
+        <div className="flex items-center gap-4 z-10">
           <button
             onClick={handleOpenNewTab}
-            className="flex items-center gap-2 p-2 sm:px-4 sm:py-2 bg-white/10 hover:bg-white/20 backdrop-blur-md rounded-full text-white text-sm font-bold transition-colors"
+            className="flex items-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/20 backdrop-blur-md rounded-full text-white text-sm font-bold transition-colors"
           >
             <ExternalLink size={16} />
             <span className="hidden sm:inline">New Tab</span>
@@ -202,13 +195,13 @@ export function UI() {
           {user ? (
             <div className="flex items-center gap-2">
               <button title="AI Studio" onClick={() => setShowAICreator(true)} className="p-2 bg-purple-500/20 hover:bg-purple-500/40 border border-purple-500/50 rounded-full text-purple-400 transition-colors pointer-events-auto shadow-[0_0_15px_rgba(168,85,247,0.2)]">
-                <Sparkles size={18} className="sm:w-5 sm:h-5" />
+                <Sparkles size={20} />
               </button>
               <button onClick={() => setShowShop(true)} className="p-2 bg-yellow-500/20 hover:bg-yellow-500/40 border border-yellow-500/50 rounded-full text-yellow-400 transition-colors pointer-events-auto shadow-[0_0_15px_rgba(234,179,8,0.2)]">
-                <ShoppingCart size={18} className="sm:w-5 sm:h-5" />
+                <ShoppingCart size={20} />
               </button>
               <button onClick={() => setShowSettings(!showSettings)} className="p-2 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors pointer-events-auto">
-                <Settings size={18} className="sm:w-5 sm:h-5" />
+                <Settings size={20} />
               </button>
             </div>
           ) : (
@@ -226,7 +219,7 @@ export function UI() {
 
       {/* Leaderboard */}
       {(!isAlive || globalLeaderboard.length > 0) && (
-        <div className={`absolute top-20 right-3 sm:right-4 w-[calc(100vw-1.5rem)] sm:w-64 bg-black/40 backdrop-blur-md rounded-2xl p-3 sm:p-4 border border-white/10 pointer-events-auto max-h-[40vh] sm:max-h-[50vh] overflow-y-auto ${isAlive ? 'hidden sm:block' : ''}`}>
+        <div className="absolute top-20 right-4 w-64 bg-black/40 backdrop-blur-md rounded-2xl p-4 border border-white/10 pointer-events-auto max-h-[50vh] overflow-y-auto">
           <div className="flex items-center gap-2 mb-4 text-white/80 font-semibold">
             <Trophy size={18} className="text-yellow-400" />
             <h2>GLOBAL TOP 10</h2>
@@ -252,20 +245,12 @@ export function UI() {
 
       {/* Shop Modal */}
       <AnimatePresence>
-        {showShop && (
-          <Suspense fallback={<ModalFallback />}>
-            <Shop onClose={() => setShowShop(false)} />
-          </Suspense>
-        )}
+        {showShop && <Shop onClose={() => setShowShop(false)} />}
       </AnimatePresence>
 
       {/* AI Creator Modal */}
       <AnimatePresence>
-        {showAICreator && (
-          <Suspense fallback={<ModalFallback />}>
-            <AICreator onClose={() => setShowAICreator(false)} />
-          </Suspense>
-        )}
+        {showAICreator && <AICreator onClose={() => setShowAICreator(false)} />}
       </AnimatePresence>
 
       {/* Settings Modal */}
@@ -322,45 +307,47 @@ export function UI() {
       </AnimatePresence>
 
       {/* Menus */}
-      {(!player || isDead) && (
-        <motion.div
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="absolute inset-0 flex items-center justify-center pointer-events-auto bg-black/60 backdrop-blur-sm z-50 p-4"
-        >
-          <div className="bg-zinc-900/90 p-6 sm:p-8 rounded-3xl border border-white/10 shadow-2xl max-w-md w-full flex flex-col items-center gap-6">
-            {isDead && (
-              <div className="text-center">
-                <h2 className="text-4xl font-black text-red-500 mb-2">YOU DIED</h2>
-                <p className="text-white/60">Final Length: {Math.floor(player.score)}</p>
-              </div>
-            )}
-
-            {!isDead && (
-              <div className="text-center">
-                <h2 className="text-3xl font-black text-white mb-2">JOIN ARENA</h2>
-                <p className="text-white/60 text-sm">Steer with A/D or Left/Right. Space to boost.</p>
-              </div>
-            )}
-
-            <button
-              onClick={handleJoinGame}
-              disabled={!isConnected}
-              className="w-full py-4 bg-white text-black font-bold rounded-xl hover:bg-gray-200 transition-colors active:scale-95 text-xl select-none disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100"
-            >
-              {isDead ? 'RESPAWN' : 'PLAY'}
-            </button>
-          </div>
-        </motion.div>
-      )}
+      <AnimatePresence>
+        {(!player || isDead) && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            className="absolute inset-0 flex items-center justify-center pointer-events-auto bg-black/60 backdrop-blur-sm z-50"
+          >
+            <div className="bg-zinc-900/90 p-8 rounded-3xl border border-white/10 shadow-2xl max-w-md w-full flex flex-col items-center gap-6">
+              {isDead && (
+                <div className="text-center">
+                  <h2 className="text-4xl font-black text-red-500 mb-2">YOU DIED</h2>
+                  <p className="text-white/60">Final Length: {Math.floor(player.score)}</p>
+                </div>
+              )}
+              
+              {!isDead && (
+                <div className="text-center">
+                  <h2 className="text-3xl font-black text-white mb-2">JOIN ARENA</h2>
+                  <p className="text-white/60 text-sm">Steer with A/D or Left/Right. Space to boost.</p>
+                </div>
+              )}
+              
+              <button
+                onClick={handleJoinGame}
+                className="w-full py-4 bg-white text-black font-bold rounded-xl hover:bg-gray-200 transition-colors active:scale-95 text-xl select-none"
+              >
+                {isDead ? 'RESPAWN' : 'PLAY'}
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Mobile Controls */}
       {isAlive && (
-        <div className="absolute inset-x-0 bottom-3 pointer-events-none flex justify-between px-6 sm:hidden z-40 select-none touch-none [padding-bottom:max(1.25rem,env(safe-area-inset-bottom))]">
+        <div className="absolute inset-x-0 bottom-4 pointer-events-none flex justify-between px-8 sm:hidden z-40 select-none touch-none pb-8">
           {/* Joystick */}
           <div 
             ref={joyRef}
-            className="w-28 h-28 bg-white/5 active:bg-white/10 backdrop-blur-md rounded-full border border-white/20 touch-none pointer-events-auto relative flex items-center justify-center opacity-70"
+            className="w-32 h-32 bg-white/5 active:bg-white/10 backdrop-blur-md rounded-full border border-white/20 touch-none pointer-events-auto relative flex items-center justify-center opacity-70"
             onPointerDown={(e) => { e.preventDefault(); handleJoyMove(e); }}
             onPointerMove={(e) => { e.preventDefault(); if (e.buttons > 0) handleJoyMove(e); }}
             onPointerUp={(e) => { e.preventDefault(); handleJoyEnd(); }}
@@ -369,21 +356,21 @@ export function UI() {
             onContextMenu={(e) => e.preventDefault()}
           >
             <div 
-              className="w-10 h-10 bg-white/50 rounded-full shadow-[0_0_15px_rgba(255,255,255,0.5)] pointer-events-none transition-transform duration-75"
+              className="w-12 h-12 bg-white/50 rounded-full shadow-[0_0_15px_rgba(255,255,255,0.5)] pointer-events-none transition-transform duration-75"
               style={{ transform: `translate(${joyPos.x}px, ${joyPos.y}px)` }}
             />
           </div>
           
           {/* Boost */}
           <button
-            className="w-20 h-20 bg-yellow-500/20 active:bg-yellow-500/50 backdrop-blur-md rounded-full flex items-center justify-center text-yellow-500 pointer-events-auto border border-yellow-500/50 touch-none select-none self-end mb-4 shadow-[0_0_20px_rgba(234,179,8,0.3)]"
+            className="w-24 h-24 bg-yellow-500/20 active:bg-yellow-500/50 backdrop-blur-md rounded-full flex items-center justify-center text-yellow-500 pointer-events-auto border border-yellow-500/50 touch-none select-none self-end mb-4 shadow-[0_0_20px_rgba(234,179,8,0.3)]"
             onPointerDown={(e) => { e.preventDefault(); mobileInputs.boost = true; if (navigator.vibrate) navigator.vibrate(15); }}
             onPointerUp={(e) => { e.preventDefault(); mobileInputs.boost = false; }}
             onPointerLeave={(e) => { e.preventDefault(); mobileInputs.boost = false; }}
             onPointerCancel={(e) => { e.preventDefault(); mobileInputs.boost = false; }}
             onContextMenu={(e) => e.preventDefault()}
           >
-            <Zap size={34} className="fill-yellow-500" />
+            <Zap size={40} className="fill-yellow-500" />
           </button>
         </div>
       )}

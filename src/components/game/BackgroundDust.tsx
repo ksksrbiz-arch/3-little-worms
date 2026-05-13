@@ -3,7 +3,7 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { globalGameState } from '../../store/gameStore';
 
-export const BackgroundDust = React.memo(function BackgroundDust({ WORLD_SIZE }: { WORLD_SIZE: number }) {
+export function BackgroundDust({ WORLD_SIZE }: { WORLD_SIZE: number }) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const particleCount = 500;
   
@@ -45,4 +45,4 @@ export const BackgroundDust = React.memo(function BackgroundDust({ WORLD_SIZE }:
       <meshBasicMaterial color="#ffffff" transparent opacity={0.15} blending={THREE.AdditiveBlending} depthWrite={false} />
     </instancedMesh>
   );
-});
+}

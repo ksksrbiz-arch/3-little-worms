@@ -4,9 +4,7 @@ import * as THREE from 'three';
 import { globalGameState } from '../../store/gameStore';
 import { localCollectedOrbs } from './utils';
 
-const MAX_ORB_INSTANCES = 1000;
-
-export const Orbs = React.memo(function Orbs() {
+export function Orbs() {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
   const colorObj = useMemo(() => new THREE.Color(), []);
@@ -18,7 +16,6 @@ export const Orbs = React.memo(function Orbs() {
 
     let i = 0;
     for (const orbId in gs.orbs) {
-      if (i >= MAX_ORB_INSTANCES) break; // Don't overflow the pre-allocated instance buffer
       if (localCollectedOrbs.has(orbId)) continue;
       const orb = gs.orbs[orbId];
       dummy.position.set(orb.x, orb.y, 0.5);
@@ -26,7 +23,8 @@ export const Orbs = React.memo(function Orbs() {
       dummy.scale.setScalar(scale);
       dummy.updateMatrix();
       meshRef.current.setMatrixAt(i, dummy.matrix);
-      colorObj.set(orb.color);
+      const actualColor = orb.color.startsWith('data:image') ? '#ffffff' : (orb.color === 'rainbow' || orb.color === 'chrome' ? '#ffffff' : (orb.color === 'neon' ? '#39ff14' : orb.color));
+      colorObj.set(actualColor);
       meshRef.current.setColorAt(i, colorObj);
       i++;
     }
@@ -38,7 +36,7 @@ export const Orbs = React.memo(function Orbs() {
   });
 
   return (
-    <instancedMesh ref={meshRef} args={[null as any, null as any, MAX_ORB_INSTANCES]} castShadow receiveShadow frustumCulled={false}>
+    <instancedMesh ref={meshRef} args={[null as any, null as any, 1000]} castShadow receiveShadow frustumCulled={false}>
       <sphereGeometry args={[0.5, 16, 16]} />
       <meshStandardMaterial
         roughness={0.4}
@@ -56,4 +54,4 @@ export const Orbs = React.memo(function Orbs() {
       />
     </instancedMesh>
   );
-});
+}

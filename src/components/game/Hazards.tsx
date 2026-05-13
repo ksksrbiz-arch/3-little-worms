@@ -3,7 +3,7 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { globalGameState } from '../../store/gameStore';
 
-export const Hazards = React.memo(function Hazards() {
+export function Hazards() {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
   const uniforms = useMemo(() => ({ uTime: { value: 0 } }), []);
@@ -67,4 +67,4 @@ export const Hazards = React.memo(function Hazards() {
       />
     </instancedMesh>
   );
-});
+}

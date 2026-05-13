@@ -3,7 +3,7 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { globalGameState } from '../../store/gameStore';
 
-export const DeathExplosions = React.memo(function DeathExplosions() {
+export function DeathExplosions() {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
   const colorObj = useMemo(() => new THREE.Color(), []);
@@ -71,7 +71,8 @@ export const DeathExplosions = React.memo(function DeathExplosions() {
         meshRef.current.setMatrixAt(pCount, dummy.matrix);
         
         const lifeRatio = p.life / p.maxLife;
-        colorObj.set(p.color).multiplyScalar(2.0 * (1.0 - lifeRatio));
+        const actualColor = p.color.startsWith('data:image') ? '#ffffff' : (p.color === 'rainbow' || p.color === 'chrome' ? '#ffffff' : (p.color === 'neon' ? '#39ff14' : p.color));
+        colorObj.set(actualColor).multiplyScalar(2.0 * (1.0 - lifeRatio));
         meshRef.current.setColorAt(pCount, colorObj);
         
         pCount++;
@@ -97,4 +98,4 @@ export const DeathExplosions = React.memo(function DeathExplosions() {
       />
     </instancedMesh>
   );
-});
+}

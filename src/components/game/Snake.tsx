@@ -1,16 +1,10 @@
 import React, { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { Sphere } from '@react-three/drei';
+import { Sphere, Text } from '@react-three/drei';
 import * as THREE from 'three';
 import { globalGameState } from '../../store/gameStore';
-import { getCachedTexture } from '../../lib/textureCache';
 
-// Pre-allocated capacity of the body InstancedMesh. The render loop must never
-// write past this many body segments or Three.js will throw a range error and
-// kill the WebGL render loop, freezing the game.
-const MAX_BODY_INSTANCES = 2000;
-
-export const Snake = React.memo(function Snake({ playerId, color, isLocal, name }: { playerId: string, color: string, isLocal: boolean, name?: string }) {
+export function Snake({ playerId, color, isLocal, name }: { playerId: string, color: string, isLocal: boolean, name?: string }) {
   const bodyRef = useRef<THREE.InstancedMesh>(null);
   const headRef = useRef<THREE.Mesh>(null);
   const particlesRef = useRef<THREE.InstancedMesh>(null);
@@ -28,13 +22,13 @@ export const Snake = React.memo(function Snake({ playerId, color, isLocal, name 
   };
   
   const skin = useMemo(() => getSkinProperties(color), [color]);
-  const baseColorObj = useMemo(() => new THREE.Color(skin.color), [skin.color]);
   const customTexture = useMemo(() => {
     if (skin.isCustom && skin.customUrl) {
-       return getCachedTexture(skin.customUrl, (tex) => {
-         tex.wrapS = THREE.RepeatWrapping;
-         tex.wrapT = THREE.RepeatWrapping;
-       });
+       const loader = new THREE.TextureLoader();
+       const tex = loader.load(skin.customUrl);
+       tex.wrapS = THREE.RepeatWrapping;
+       tex.wrapT = THREE.RepeatWrapping;
+       return tex;
     }
     return null;
   }, [skin.customUrl]);
@@ -69,9 +63,7 @@ export const Snake = React.memo(function Snake({ playerId, color, isLocal, name 
     }
     
     headRef.current.visible = true;
-    // Cap rendered segments to the head + body instance capacity so we never
-    // call setMatrixAt past the pre-allocated buffer length.
-    const count = Math.min(player.segments.length, MAX_BODY_INSTANCES + 1);
+    const count = player.segments.length;
     bodyRef.current.count = Math.max(0, count - 1);
     
     while (currentPositions.current.length < count) {
@@ -163,7 +155,7 @@ export const Snake = React.memo(function Snake({ playerId, color, isLocal, name 
           particlesRef.current.setMatrixAt(pCount, dummy.matrix);
           
           const lifeRatio = p.life / p.maxLife;
-          particleColorObj.set(color).multiplyScalar(3.0 * (1.0 - lifeRatio));
+          particleColorObj.set(skin.color).multiplyScalar(3.0 * (1.0 - lifeRatio));
           particlesRef.current.setColorAt(pCount, particleColorObj);
           pCount++;
         }
@@ -219,8 +211,20 @@ export const Snake = React.memo(function Snake({ playerId, color, isLocal, name 
           toneMapped={false}
           onBeforeCompile={shaderSetup}
         />
+        {name && (
+          <Text
+            position={[0, 1.5, 0]}
+            fontSize={0.5}
+            color="white"
+            outlineWidth={0.05}
+            outlineColor="black"
+            font="https://fonts.gstatic.com/s/inter/v12/UcCO3FwrK3iLTeHuS_fvQtMwCp50KnMw2boKoduKmMEVuLyfAZ9hiA.woff2"
+          >
+            {name}
+          </Text>
+        )}
       </Sphere>
-      <instancedMesh ref={bodyRef} args={[null as any, null as any, MAX_BODY_INSTANCES]} castShadow receiveShadow frustumCulled={false}>
+      <instancedMesh ref={bodyRef} args={[null as any, null as any, 2000]} castShadow receiveShadow frustumCulled={false}>
         <sphereGeometry args={[0.6, 16, 16]} />
         <meshStandardMaterial
           color={skin.color}
@@ -247,4 +251,4 @@ export const Snake = React.memo(function Snake({ playerId, color, isLocal, name 
       )}
     </group>
   );
-});
+}
