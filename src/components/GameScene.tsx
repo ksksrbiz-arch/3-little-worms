@@ -28,7 +28,10 @@ const THEMES: Record<string, { bg: string, cell: string, section: string }> = {
 };
 
 export function GameScene() {
-  const { gameState, playerId, sendPlayerState, sendCollectOrb } = useGameStore();
+  const gameState = useGameStore(state => state.gameState);
+  const playerId = useGameStore(state => state.playerId);
+  const sendPlayerState = useGameStore(state => state.sendPlayerState);
+  const sendCollectOrb = useGameStore(state => state.sendCollectOrb);
   const { profile } = useUserStore();
   const { camera } = useThree();
   const inputs = useRef({ left: false, right: false, boost: false });

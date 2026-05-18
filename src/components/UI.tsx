@@ -15,7 +15,9 @@ import { AICreator } from './AICreator';
 import { audioManager } from '../lib/audio';
 
 export function UI() {
-  const { gameState, playerId, joinGame } = useGameStore();
+  const gameState = useGameStore(state => state.gameState);
+  const playerId = useGameStore(state => state.playerId);
+  const joinGame = useGameStore(state => state.joinGame);
 
   const player = playerId && gameState ? gameState.players[playerId] : null;
   const isAlive = player?.state === 'alive';
