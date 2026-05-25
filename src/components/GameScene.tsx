@@ -46,6 +46,11 @@ export function GameScene() {
     isBoosting: boolean;
     wasBoosting: boolean;
     lastSendTime: number;
+    magnetTime: number;
+    shieldTime: number;
+    doubleTime: number;
+    kills: number;
+    killStreak: number;
   }>({
     active: false,
     segments: [],
@@ -54,7 +59,15 @@ export function GameScene() {
     isBoosting: false,
     wasBoosting: false,
     lastSendTime: 0,
+    magnetTime: 0,
+    shieldTime: 0,
+    doubleTime: 0,
+    kills: 0,
+    killStreak: 0,
   });
+
+  const isLocalDeadRef = useRef(false);
+  const lastStateRef = useRef<string | null>(null);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -91,20 +104,39 @@ export function GameScene() {
     
     const serverPlayer = gs.players[playerId];
     if (serverPlayer && serverPlayer.state === 'alive') {
+      if (lastStateRef.current !== 'alive') {
+        isLocalDeadRef.current = false;
+      }
       
       // Initialize from server if not active
-      if (!localPlayerRef.current.active && serverPlayer.segments.length > 0) {
+      if (!localPlayerRef.current.active && !isLocalDeadRef.current && serverPlayer.segments.length > 0) {
         localPlayerRef.current.active = true;
         localPlayerRef.current.segments = [...serverPlayer.segments];
         localPlayerRef.current.score = serverPlayer.score;
         localPlayerRef.current.currentAngle = serverPlayer.currentAngle;
+        localPlayerRef.current.magnetTime = serverPlayer.magnetTime || 0;
+        localPlayerRef.current.shieldTime = serverPlayer.shieldTime || 0;
+        localPlayerRef.current.doubleTime = serverPlayer.doubleTime || 0;
+        localPlayerRef.current.kills = serverPlayer.kills || 0;
+        localPlayerRef.current.killStreak = serverPlayer.killStreak || 0;
       }
 
       if (!localPlayerRef.current.active) return;
 
       // Local movement logic
-      if (inputs.current.left || mobileInputs.left) localPlayerRef.current.currentAngle += TURN_SPEED * delta;
-      if (inputs.current.right || mobileInputs.right) localPlayerRef.current.currentAngle -= TURN_SPEED * delta;
+      if (mobileInputs.active) {
+        const targetAngle = mobileInputs.angle;
+        let diff = Math.atan2(Math.sin(targetAngle - localPlayerRef.current.currentAngle), Math.cos(targetAngle - localPlayerRef.current.currentAngle));
+        const maxTurn = TURN_SPEED * delta;
+        if (Math.abs(diff) < maxTurn) {
+          localPlayerRef.current.currentAngle = targetAngle;
+        } else {
+          localPlayerRef.current.currentAngle += Math.sign(diff) * maxTurn;
+        }
+      } else {
+        if (inputs.current.left || mobileInputs.left) localPlayerRef.current.currentAngle += TURN_SPEED * delta;
+        if (inputs.current.right || mobileInputs.right) localPlayerRef.current.currentAngle -= TURN_SPEED * delta;
+      }
       
       localPlayerRef.current.isBoosting = (inputs.current.boost || mobileInputs.boost) && localPlayerRef.current.score > 10;
       const speed = localPlayerRef.current.isBoosting ? BOOST_SPEED : BASE_SPEED;
@@ -122,6 +154,10 @@ export function GameScene() {
 
       localPlayerRef.current.segments.unshift(head);
 
+      if (localPlayerRef.current.magnetTime > 0) localPlayerRef.current.magnetTime = Math.max(0, localPlayerRef.current.magnetTime - delta);
+      if (localPlayerRef.current.shieldTime > 0) localPlayerRef.current.shieldTime = Math.max(0, localPlayerRef.current.shieldTime - delta);
+      if (localPlayerRef.current.doubleTime > 0) localPlayerRef.current.doubleTime = Math.max(0, localPlayerRef.current.doubleTime - delta);
+
       if (localPlayerRef.current.isBoosting) {
         localPlayerRef.current.score -= 2 * delta;
         if (localPlayerRef.current.score <= 10) {
@@ -135,6 +171,22 @@ export function GameScene() {
         localPlayerRef.current.segments.pop();
       }
 
+      // Local magnet attraction
+      if (localPlayerRef.current.magnetTime > 0) {
+        for (const orbId in gs.orbs) {
+          if (localCollectedOrbs.has(orbId)) continue;
+          const orb = gs.orbs[orbId];
+          const dx = head.x - orb.x;
+          const dy = head.y - orb.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist > 1.5 && dist < 15) {
+            const pullFactor = 15 * delta;
+            orb.x += (head.x - orb.x) * (pullFactor / dist);
+            orb.y += (head.y - orb.y) * (pullFactor / dist);
+          }
+        }
+      }
+
       // Check orb collisions
       for (const orbId in gs.orbs) {
         if (localCollectedOrbs.has(orbId)) continue;
@@ -142,7 +194,17 @@ export function GameScene() {
         const dx = head.x - orb.x;
         const dy = head.y - orb.y;
         if (dx * dx + dy * dy < 4) {
-          localPlayerRef.current.score += orb.value;
+          let multiplier = localPlayerRef.current.doubleTime > 0 ? 2 : 1;
+          localPlayerRef.current.score += orb.value * multiplier;
+
+          if (orb.type === 'magnet') {
+            localPlayerRef.current.magnetTime = 10;
+          } else if (orb.type === 'shield') {
+            localPlayerRef.current.shieldTime = 15;
+          } else if (orb.type === 'double') {
+            localPlayerRef.current.doubleTime = 10;
+          }
+
           localCollectedOrbs.add(orbId);
           delete gs.orbs[orbId]; // predict locally
           sendCollectOrb(orbId);
@@ -160,6 +222,8 @@ export function GameScene() {
 
       // Check player collisions
       let collided = false;
+      let killerId: string | null = null;
+      let killerName: string = '';
       for (const otherId in gs.players) {
         if (otherId === playerId) continue;
         const other = gs.players[otherId];
@@ -169,10 +233,19 @@ export function GameScene() {
           const dy = head.y - seg.y;
           if (dx * dx + dy * dy < 2.25) {
             collided = true;
+            killerId = otherId;
+            killerName = other.name;
             break;
           }
         }
         if (collided) break;
+      }
+
+      if (collided && localPlayerRef.current.shieldTime > 0) {
+        // Shield saves the day! Deplete shield and ignore death
+        localPlayerRef.current.shieldTime = 0;
+        collided = false;
+        localPlayerRef.current.currentAngle += Math.PI * 0.8; // bounce away safely
       }
 
       if (!collided && gs.hazards) {
@@ -206,21 +279,42 @@ export function GameScene() {
         audioManager.playDeath();
         if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
         localPlayerRef.current.active = false;
+        isLocalDeadRef.current = true;
+        
+        if (serverPlayer) {
+          serverPlayer.state = 'dead';
+        }
+        
         sendPlayerState({
           segments: localPlayerRef.current.segments,
           score: localPlayerRef.current.score,
           currentAngle: localPlayerRef.current.currentAngle,
           isBoosting: false,
-          state: 'dead'
+          state: 'dead',
+          killerId,
+          killerName
         });
+        
+        lastStateRef.current = 'dead';
         return;
       }
 
-      // Overwrite global state for local rendering
-      gs.players[playerId].segments = localPlayerRef.current.segments;
-      gs.players[playerId].score = localPlayerRef.current.score;
-      gs.players[playerId].currentAngle = localPlayerRef.current.currentAngle;
-      gs.players[playerId].isBoosting = localPlayerRef.current.isBoosting;
+      // Overwrite global state for local rendering only if changed
+      if (gs.players[playerId]) {
+        const p = gs.players[playerId];
+        if (p.segments !== localPlayerRef.current.segments) {
+          p.segments = localPlayerRef.current.segments;
+        }
+        if (p.score !== localPlayerRef.current.score) {
+          p.score = localPlayerRef.current.score;
+        }
+        if (p.currentAngle !== localPlayerRef.current.currentAngle) {
+          p.currentAngle = localPlayerRef.current.currentAngle;
+        }
+        if (p.isBoosting !== localPlayerRef.current.isBoosting) {
+          p.isBoosting = localPlayerRef.current.isBoosting;
+        }
+      }
 
       // Send state to server at 20Hz
       const now = Date.now();
@@ -230,7 +324,10 @@ export function GameScene() {
           score: localPlayerRef.current.score,
           currentAngle: localPlayerRef.current.currentAngle,
           isBoosting: localPlayerRef.current.isBoosting,
-          state: 'alive'
+          state: 'alive',
+          magnetTime: localPlayerRef.current.magnetTime,
+          shieldTime: localPlayerRef.current.shieldTime,
+          doubleTime: localPlayerRef.current.doubleTime,
         });
         localPlayerRef.current.lastSendTime = now;
       }
@@ -248,8 +345,11 @@ export function GameScene() {
         lightRef.current.position.set(camera.position.x + 10, camera.position.y - 10, 30);
         lightTarget.position.set(camera.position.x, camera.position.y, 0);
       }
+      
+      lastStateRef.current = 'alive';
     } else {
       localPlayerRef.current.active = false;
+      lastStateRef.current = serverPlayer ? serverPlayer.state : null;
     }
   });
 

@@ -67,16 +67,50 @@ const state: GameState = {
 function spawnOrb(x?: number, y?: number, value?: number, color?: string, force = false) {
   if (!force && Object.keys(state.orbs).length >= MAX_ORBS) return;
   const id = uuidv4();
+  
+  let type: 'standard' | 'magnet' | 'shield' | 'double' = 'standard';
+  let orbVal = value;
+  let orbColor = color;
+
   if (value === undefined) {
-    value = Math.random() < 0.1 ? 5 : 1; // 10% chance to be large orb
+    const rand = Math.random();
+    if (rand < 0.03) {
+      type = 'magnet';
+      orbVal = 3;
+      orbColor = '#9d4edd'; // neon purple-violet
+    } else if (rand < 0.06) {
+      type = 'shield';
+      orbVal = 3;
+      orbColor = '#00f0ff'; // neon cyan
+    } else if (rand < 0.09) {
+      type = 'double';
+      orbVal = 3;
+      orbColor = '#ffb703'; // glowing gold
+    } else if (rand < 0.20) {
+      type = 'standard';
+      orbVal = 5; // Large orb
+      orbColor = color ?? COLORS[Math.floor(Math.random() * COLORS.length)];
+    } else {
+      type = 'standard';
+      orbVal = 1;
+      orbColor = color ?? COLORS[Math.floor(Math.random() * COLORS.length)];
+    }
   }
-  state.orbs[id] = {
+
+  const newOrb: Orb = {
     id,
     x: x ?? (Math.random() - 0.5) * WORLD_SIZE,
     y: y ?? (Math.random() - 0.5) * WORLD_SIZE,
-    value,
-    color: color ?? COLORS[Math.floor(Math.random() * COLORS.length)],
+    value: orbVal ?? 1,
+    color: orbColor ?? COLORS[Math.floor(Math.random() * COLORS.length)],
+    type,
   };
+
+  state.orbs[id] = newOrb;
+
+  if (io) {
+    io.emit('orb_spawn', newOrb);
+  }
 }
 
 // Initial orbs
@@ -88,6 +122,16 @@ let snakeCounter = 1;
 
 io.on('connection', (socket) => {
   console.log('Player connected:', socket.id);
+
+  // Send the active list of orbs initially
+  socket.emit('init_orbs', state.orbs);
+
+  // Handle Latency Check
+  socket.on('ping_measure', (callback) => {
+    if (typeof callback === 'function') {
+      callback();
+    }
+  });
 
   socket.on('join', (options?: { name?: string, color?: string }) => {
     const name = options?.name || `Snake-${snakeCounter++}`;
@@ -114,12 +158,25 @@ io.on('connection', (socket) => {
       state: 'alive',
       currentAngle: angle,
       inputs: { left: false, right: false, boost: false },
+      magnetTime: 0,
+      shieldTime: 0,
+      doubleTime: 0,
+      kills: 0,
+      killStreak: 0,
     };
 
     socket.emit('init', socket.id);
   });
 
-  socket.on('update_state', (data: { segments: any[], score: number, currentAngle: number, isBoosting: boolean, state: string }) => {
+  socket.on('update_state', (data: { 
+    segments: any[], 
+    score: number, 
+    currentAngle: number, 
+    isBoosting: boolean, 
+    state: string,
+    killerId?: string | null,
+    killerName?: string | null
+  }) => {
     const player = state.players[socket.id];
     if (player && player.state === 'alive') {
       player.segments = data.segments;
@@ -133,13 +190,50 @@ io.on('connection', (socket) => {
         player.segments.forEach((seg, i) => {
           if (i % 2 === 0) spawnOrb(seg.x, seg.y, 1, player.color, true);
         });
+
+        // Broadcast kill feed event!
+        let killerNameStr = data.killerName || 'a space hazard';
+        if (data.killerId) {
+          const killerPlayer = state.players[data.killerId];
+          if (killerPlayer) {
+            killerPlayer.kills += 1;
+            killerPlayer.killStreak += 1;
+            killerPlayer.score += 20; // reward killer physically!
+            killerNameStr = killerPlayer.name;
+            io.emit('kill_feed', {
+              victim: player.name,
+              victimColor: player.color,
+              killer: killerNameStr,
+              killerColor: killerPlayer.color,
+              streak: killerPlayer.killStreak,
+              killerId: data.killerId
+            });
+          } else {
+            io.emit('kill_feed', { victim: player.name, victimColor: player.color, killer: killerNameStr });
+          }
+        } else {
+          io.emit('kill_feed', { victim: player.name, victimColor: player.color, killer: killerNameStr });
+        }
+        player.killStreak = 0; // reset streak
       }
     }
   });
 
   socket.on('collect_orb', (orbId: string) => {
-    if (state.orbs[orbId]) {
+    const orb = state.orbs[orbId];
+    if (orb) {
+      const player = state.players[socket.id];
+      if (player && player.state === 'alive') {
+        if (orb.type === 'magnet') {
+          player.magnetTime = 10;
+        } else if (orb.type === 'shield') {
+          player.shieldTime = 15;
+        } else if (orb.type === 'double') {
+          player.doubleTime = 10;
+        }
+      }
       delete state.orbs[orbId];
+      io.emit('orb_collect', orbId);
     }
   });
 
@@ -160,24 +254,63 @@ import { updateBots } from './src/server/bots.ts';
 
 // Game Loop
 let lastTimeServer = Date.now();
+let tickCountServer = 0;
 setInterval(() => {
   const nowServer = Date.now();
   const delta = (nowServer - lastTimeServer) / 1000;
   lastTimeServer = nowServer;
 
-  // Update players (just for boosting orb drops)
+  // Update players (boosting orb drops and powerup decrement timers)
   for (const id in state.players) {
     const player = state.players[id];
-    if (player.state === 'alive' && player.isBoosting) {
-      if (Math.random() < 0.1 && player.segments.length > 0) {
-        const tail = player.segments[player.segments.length - 1];
-        spawnOrb(tail.x, tail.y, 1, player.color, true);
+    if (player.state === 'alive') {
+      if (player.magnetTime > 0) player.magnetTime = Math.max(0, player.magnetTime - delta);
+      if (player.shieldTime > 0) player.shieldTime = Math.max(0, player.shieldTime - delta);
+      if (player.doubleTime > 0) player.doubleTime = Math.max(0, player.doubleTime - delta);
+
+      if (player.isBoosting) {
+        if (Math.random() < 0.1 && player.segments.length > 0) {
+          const tail = player.segments[player.segments.length - 1];
+          spawnOrb(tail.x, tail.y, 1, player.color, true);
+        }
       }
     }
   }
 
-  // AI Bots Update
-  updateBots(state, delta, spawnOrb);
+  // AI Bots Update with dynamic kill tracking and orb collections
+  updateBots(state, delta, spawnOrb, (victimId, killerId) => {
+    const victim = state.players[victimId];
+    if (!victim) return;
+
+    let killerNameStr = 'a space hazard';
+    let killerColorStr = '#ff0033';
+    let streakCount = 0;
+
+    if (killerId) {
+      const killer = state.players[killerId];
+      if (killer) {
+        killer.kills += 1;
+        killer.killStreak += 1;
+        killer.score += 20; // reward killer player or bot
+        killerNameStr = killer.name;
+        killerColorStr = killer.color;
+        streakCount = killer.killStreak;
+      }
+    }
+
+    io.emit('kill_feed', {
+      victim: victim.name,
+      victimColor: victim.color,
+      killer: killerNameStr,
+      killerColor: killerColorStr,
+      streak: streakCount,
+      killerId: killerId
+    });
+
+    victim.killStreak = 0;
+  }, (orbId) => {
+    io.emit('orb_collect', orbId);
+  });
 
   // Spawn random orbs
   if (Math.random() < 0.2) {
@@ -217,11 +350,20 @@ setInterval(() => {
     .slice(0, 10)
     .map(p => ({ id: p.id, name: p.name, score: Math.floor(p.score), color: p.color }));
 
-  // Broadcast state async and volatile to prevent queue backup and UI freezes
-  if (io.engine.clientsCount > 0) {
-    setImmediate(() => {
-      io.volatile.emit('state', state);
-    });
+  // Broadcast state async and volatile at 20Hz (once every 3 ticks on 60fps loop) to save bandwidth
+  tickCountServer++;
+  if (tickCountServer % 3 === 0) {
+    if (io.engine.clientsCount > 0) {
+      const lightweightState = {
+        players: state.players,
+        leaderboard: state.leaderboard,
+        hazards: state.hazards,
+        orbs: {}, // Client retains its local state database sync
+      };
+      setImmediate(() => {
+        io.volatile.emit('state', lightweightState);
+      });
+    }
   }
 
 }, 1000 / TICK_RATE);

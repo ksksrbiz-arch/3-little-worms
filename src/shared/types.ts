@@ -32,6 +32,13 @@ export type Player = {
   currentAngle: number;
   inputs: { left: boolean; right: boolean; boost: boolean };
   isBot?: boolean;
+  // Dynamic Power-Up timers (seconds remaining)
+  magnetTime: number;
+  shieldTime: number;
+  doubleTime: number;
+  // Session stats for leaderboards & sprees
+  kills: number;
+  killStreak: number;
 };
 
 export type Orb = {
@@ -40,6 +47,7 @@ export type Orb = {
   y: number;
   value: number;
   color: string;
+  type?: 'standard' | 'magnet' | 'shield' | 'double';
 };
 
 export type LeaderboardEntry = {

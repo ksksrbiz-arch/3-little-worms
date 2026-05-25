@@ -6,7 +6,7 @@
 import { useGameStore, mobileInputs } from '../store/gameStore';
 import { useUserStore } from '../store/userStore';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ExternalLink, Trophy, ArrowLeft, ArrowRight, Zap, User, Settings, LogOut, ShoppingCart, Sparkles } from 'lucide-react';
+import { ExternalLink, Trophy, ArrowLeft, ArrowRight, Zap, User, Settings, LogOut, ShoppingCart, Sparkles, Wifi, WifiOff } from 'lucide-react';
 import { useEffect, useState, useRef } from 'react';
 import { db } from '../firebase';
 import { doc, setDoc, serverTimestamp, getDocs, collection, query, orderBy, limit } from 'firebase/firestore';
@@ -18,6 +18,49 @@ export function UI() {
   const gameState = useGameStore(state => state.gameState);
   const playerId = useGameStore(state => state.playerId);
   const joinGame = useGameStore(state => state.joinGame);
+  const socket = useGameStore(state => state.socket);
+  const connectionStatus = useGameStore(state => state.connectionStatus);
+  const ping = useGameStore(state => state.ping);
+  const reconnect = useGameStore(state => state.reconnect);
+
+  interface KillFeedItem {
+    id: string;
+    victimName: string;
+    killerName: string | null;
+    streak?: number;
+  }
+
+  const [killFeed, setKillFeed] = useState<KillFeedItem[]>([]);
+  const paymentProcessed = useRef(false);
+  const scoreSavedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleKill = (data: { victim: string; killer: string | null; streak?: number }) => {
+      const newItem: KillFeedItem = {
+        id: Math.random().toString(),
+        victimName: data.victim,
+        killerName: data.killer,
+        streak: data.streak
+      };
+      setKillFeed(prev => [...prev.slice(-4), newItem]);
+    };
+
+    socket.on('kill_feed', handleKill);
+    return () => {
+      socket.off('kill_feed', handleKill);
+    };
+  }, [socket]);
+
+  useEffect(() => {
+    if (killFeed.length > 0) {
+      const timer = setTimeout(() => {
+        setKillFeed(prev => prev.slice(1));
+      }, 4500);
+      return () => clearTimeout(timer);
+    }
+  }, [killFeed]);
 
   const player = playerId && gameState ? gameState.players[playerId] : null;
   const isAlive = player?.state === 'alive';
@@ -29,16 +72,27 @@ export function UI() {
   const [showAICreator, setShowAICreator] = useState(false);
   const [globalLeaderboard, setGlobalLeaderboard] = useState<any[]>([]);
   const [localName, setLocalName] = useState('');
+
   useEffect(() => {
-    if (profile) setLocalName(profile.displayName);
-  }, [profile]);
+    setLocalName(profile?.displayName || '');
+  }, [profile?.displayName]);
 
   // Joystick state
   const joyRef = useRef<HTMLDivElement>(null);
   const [joyPos, setJoyPos] = useState({ x: 0, y: 0 });
+  const activePointerId = useRef<number | null>(null);
+
+  const handleJoyStart = (e: React.PointerEvent) => {
+    if (!joyRef.current) return;
+    activePointerId.current = e.pointerId;
+    try {
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    } catch (err) {}
+    handleJoyMove(e);
+  };
 
   const handleJoyMove = (e: React.PointerEvent) => {
-    if (!joyRef.current) return;
+    if (!joyRef.current || activePointerId.current !== e.pointerId) return;
     const rect = joyRef.current.getBoundingClientRect();
     const centerX = rect.left + rect.width / 2;
     const centerY = rect.top + rect.height / 2;
@@ -55,31 +109,50 @@ export function UI() {
     const joyY = Math.sin(angle) * clampedDist;
     setJoyPos({ x: joyX, y: joyY });
     
+    if (distance > 5) {
+      mobileInputs.active = true;
+      // Screen space dy is positive-down; world space y is positive-up.
+      // Negate dy to convert from screen space to world space direction.
+      mobileInputs.angle = Math.atan2(-dy, dx);
+    } else {
+      mobileInputs.active = false;
+    }
+    
+    // Maintain backward compatibility logic just in case
     mobileInputs.left = joyX < -15;
     mobileInputs.right = joyX > 15;
   };
 
-  const handleJoyEnd = () => {
-    setJoyPos({ x: 0, y: 0 });
-    mobileInputs.left = false;
-    mobileInputs.right = false;
+  const handleJoyEnd = (e: React.PointerEvent) => {
+    if (activePointerId.current === e.pointerId) {
+      if (joyRef.current) {
+        try {
+          (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+        } catch (err) {}
+      }
+      activePointerId.current = null;
+      setJoyPos({ x: 0, y: 0 });
+      mobileInputs.active = false;
+      mobileInputs.left = false;
+      mobileInputs.right = false;
+    }
   };
 
 
-let leaderboardCache: { data: any[] | null, expires: number } = { data: null, expires: 0 };
+  const leaderboardCache = useRef<{ data: any[] | null, expires: number }>({ data: null, expires: 0 });
 
   useEffect(() => {
     // Fetch global leaderboard
     const fetchLeaderboard = async () => {
       try {
-        if (Date.now() < leaderboardCache.expires && leaderboardCache.data) {
-          setGlobalLeaderboard(leaderboardCache.data);
+        if (Date.now() < leaderboardCache.current.expires && leaderboardCache.current.data) {
+          setGlobalLeaderboard(leaderboardCache.current.data);
           return;
         }
         const q = query(collection(db, 'leaderboard'), orderBy('score', 'desc'), limit(10));
         const snap = await getDocs(q);
         const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        leaderboardCache = { data, expires: Date.now() + 30000 }; // 30s cache
+        leaderboardCache.current = { data, expires: Date.now() + 30000 }; // 30s cache
         setGlobalLeaderboard(data);
       } catch (err) {
         console.error(err);
@@ -92,23 +165,36 @@ let leaderboardCache: { data: any[] | null, expires: number } = { data: null, ex
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get('payment') === 'success') {
-      // In a real app, a Stripe Webhook handles the actual database update to prevent spoofing.
-      // For this demo, we can optimistically grant the coins.
+    const paymentStatus = params.get('payment');
+    if (!paymentStatus) return;
+    if (paymentProcessed.current) return;
+
+    if (paymentStatus === 'success') {
       if (user && profile) {
+        paymentProcessed.current = true;
         const ref = doc(db, 'users', user.uid);
-        // Clean URL to prevent refresh granting multiple
-        window.history.replaceState({}, '', window.location.pathname);
+        
+        try {
+          window.history.replaceState({}, '', window.location.pathname);
+        } catch (e) {
+          console.warn('replaceState blocked or failed', e);
+        }
+
         // Grant 1000 coins (this is an insecure client-side grant for demo purposes)
         setDoc(ref, { coins: (profile.coins || 0) + 1000, updatedAt: serverTimestamp() }, { merge: true })
           .then(() => useUserStore.getState().checkProfile(user))
           .catch(e => console.error(e));
         alert('Payment successful! 1000 Coins added.');
       }
-    } else if (params.get('payment') === 'cancelled') {
+    } else if (paymentStatus === 'cancelled') {
+      paymentProcessed.current = true;
+      try {
         window.history.replaceState({}, '', window.location.pathname);
+      } catch (e) {
+        console.warn('replaceState blocked or failed', e);
+      }
     }
-  }, [user, profile]);
+  }, [user?.uid, profile?.coins]);
 
   const handleJoinGame = () => {
     audioManager.init();
@@ -119,16 +205,26 @@ let leaderboardCache: { data: any[] | null, expires: number } = { data: null, ex
     }
   };
 
+  const playerRef = useRef(player);
+  playerRef.current = player;
+
   useEffect(() => {
-    if (isDead && player && user) {
+    if (isDead && user) {
+      const p = playerRef.current;
+      if (!p) return;
+      
+      const currentScoreKey = `${user.uid}_${Math.floor(p.score)}`;
+      if (scoreSavedRef.current === currentScoreKey) return;
+      scoreSavedRef.current = currentScoreKey;
+
       // Save score
       const scoreId = `${user.uid}_${Date.now()}`;
       setDoc(doc(db, 'leaderboard', scoreId), {
         userId: user.uid,
-        score: Math.floor(player.score),
+        score: Math.floor(p.score),
         timePlayed: Math.floor((Date.now() - 0) / 1000), // simplified
-        name: player.name,
-        color: player.color,
+        name: p.name,
+        color: p.color,
         createdAt: serverTimestamp(),
       }).catch(err => {
         const errInfo = {
@@ -138,8 +234,10 @@ let leaderboardCache: { data: any[] | null, expires: number } = { data: null, ex
         };
         console.error(JSON.stringify(errInfo));
       });
+    } else if (!isDead) {
+      scoreSavedRef.current = null;
     }
-  }, [isDead]);
+  }, [isDead, user?.uid]);
 
   const handleOpenNewTab = () => {
     window.open(window.location.href, '_blank');
@@ -166,8 +264,48 @@ let leaderboardCache: { data: any[] | null, expires: number } = { data: null, ex
             NEON.SNAKE
           </h1>
           {isAlive && (
-            <div className="text-xl font-mono text-white/80 font-bold">
-              Length: {Math.floor(player.score)}
+            <div className="flex flex-col gap-1.5">
+              <div className="text-xl font-mono text-white/80 font-bold">
+                Length: {Math.floor(player.score)}
+              </div>
+              
+              {/* Kills & Streaks HUD */}
+              {(player.kills > 0 || player.killStreak > 0) && (
+                <div className="flex gap-2">
+                  {player.kills > 0 && (
+                    <div className="bg-red-500/20 text-red-300 border border-red-500/30 px-2 py-0.5 rounded text-[10px] font-bold font-mono">
+                      KILLS: {player.kills}
+                    </div>
+                  )}
+                  {player.killStreak > 1 && (
+                    <div className="bg-orange-500/20 text-orange-300 border border-orange-500/30 px-2 py-0.5 rounded text-[10px] font-bold font-mono animate-bounce">
+                      STREAK: {player.killStreak} 🔥
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Power-up Pills */}
+              <div className="flex flex-col sm:flex-row gap-1.5 mt-0.5">
+                {player.magnetTime > 0 && (
+                  <div className="flex items-center gap-1.5 bg-purple-500/20 text-purple-300 border border-purple-500/40 px-2.5 py-1 rounded-full text-[10px] font-bold font-mono tracking-wide shadow-[0_0_10px_rgba(168,85,247,0.15)] animate-pulse">
+                    <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-ping" />
+                    <span>MAGNET: {Math.max(0, Math.ceil(player.magnetTime))}s</span>
+                  </div>
+                )}
+                {player.shieldTime > 0 && (
+                  <div className="flex items-center gap-1.5 bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 px-2.5 py-1 rounded-full text-[10px] font-bold font-mono tracking-wide shadow-[0_0_10px_rgba(6,182,212,0.15)] animate-pulse">
+                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
+                    <span>SHIELD: {Math.max(0, Math.ceil(player.shieldTime))}s</span>
+                  </div>
+                )}
+                {player.doubleTime > 0 && (
+                  <div className="flex items-center gap-1.5 bg-yellow-500/20 text-yellow-300 border border-yellow-500/40 px-2.5 py-1 rounded-full text-[10px] font-bold font-mono tracking-wide shadow-[0_0_10px_rgba(234,179,8,0.15)] animate-pulse">
+                    <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-ping" />
+                    <span>DOUBLE: {Math.max(0, Math.ceil(player.doubleTime))}s</span>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -185,7 +323,38 @@ let leaderboardCache: { data: any[] | null, expires: number } = { data: null, ex
           </div>
         </div>
 
-        <div className="flex items-center gap-4 z-10">
+        <div className="flex items-center gap-4 z-10 pointer-events-auto">
+          {/* Connection Status Badge */}
+          <div className="flex items-center gap-2 px-3.5 py-2 rounded-full bg-zinc-900/80 backdrop-blur-md border border-white/10 text-xs font-mono select-none">
+            {connectionStatus === 'connected' && (
+              <>
+                <Wifi size={13} className="text-emerald-400" />
+                <span className="text-emerald-400 font-bold tracking-wider">LIVE</span>
+                <span className="text-white/20">|</span>
+                <span className="text-white/80 font-medium">{ping}ms</span>
+              </>
+            )}
+            {(connectionStatus === 'connecting' || connectionStatus === 'reconnecting') && (
+              <>
+                <Wifi size={13} className="text-amber-400 animate-pulse" />
+                <span className="text-amber-400 font-bold tracking-wider animate-pulse">CONNECTING</span>
+              </>
+            )}
+            {(connectionStatus === 'disconnected' || connectionStatus === 'failed') && (
+              <>
+                <WifiOff size={13} className="text-rose-400" />
+                <span className="text-rose-400 font-bold tracking-wider">OFFLINE</span>
+                <span className="text-white/20">|</span>
+                <button
+                  onClick={reconnect}
+                  className="text-white hover:text-blue-400 font-bold tracking-tight underline cursor-pointer transition-colors"
+                >
+                  RETRY
+                </button>
+              </>
+            )}
+          </div>
+
           <button
             onClick={handleOpenNewTab}
             className="flex items-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/20 backdrop-blur-md rounded-full text-white text-sm font-bold transition-colors"
@@ -332,11 +501,22 @@ let leaderboardCache: { data: any[] | null, expires: number } = { data: null, ex
                 </div>
               )}
               
+              {/* Connection Fallback Message */}
+              {(connectionStatus === 'disconnected' || connectionStatus === 'failed') && (
+                <div className="text-rose-400 text-xs bg-rose-500/10 border border-rose-500/20 px-4 py-2.5 rounded-xl text-center font-semibold font-mono tracking-wide w-full">
+                  Disconnected from server.
+                  <button onClick={reconnect} className="block mx-auto mt-1 text-white font-bold underline hover:text-blue-400 cursor-pointer transition-colors">
+                    Reconnect Now
+                  </button>
+                </div>
+              )}
+
               <button
                 onClick={handleJoinGame}
-                className="w-full py-4 bg-white text-black font-bold rounded-xl hover:bg-gray-200 transition-colors active:scale-95 text-xl select-none"
+                disabled={connectionStatus !== 'connected'}
+                className="w-full py-4 bg-white text-black font-bold rounded-xl hover:bg-gray-200 transition-colors active:scale-95 text-xl select-none disabled:bg-white/20 disabled:text-neutral-500 disabled:cursor-not-allowed disabled:scale-100"
               >
-                {isDead ? 'RESPAWN' : 'PLAY'}
+                {connectionStatus === 'connected' ? (isDead ? 'RESPAWN' : 'PLAY') : 'WAITING FOR SERVER...'}
               </button>
             </div>
           </motion.div>
@@ -350,11 +530,11 @@ let leaderboardCache: { data: any[] | null, expires: number } = { data: null, ex
           <div 
             ref={joyRef}
             className="w-32 h-32 bg-white/5 active:bg-white/10 backdrop-blur-md rounded-full border border-white/20 touch-none pointer-events-auto relative flex items-center justify-center opacity-70"
-            onPointerDown={(e) => { e.preventDefault(); handleJoyMove(e); }}
-            onPointerMove={(e) => { e.preventDefault(); if (e.buttons > 0) handleJoyMove(e); }}
-            onPointerUp={(e) => { e.preventDefault(); handleJoyEnd(); }}
-            onPointerLeave={(e) => { e.preventDefault(); handleJoyEnd(); }}
-            onPointerCancel={(e) => { e.preventDefault(); handleJoyEnd(); }}
+            onPointerDown={handleJoyStart}
+            onPointerMove={handleJoyMove}
+            onPointerUp={handleJoyEnd}
+            onPointerLeave={handleJoyEnd}
+            onPointerCancel={handleJoyEnd}
             onContextMenu={(e) => e.preventDefault()}
           >
             <div 
@@ -376,6 +556,32 @@ let leaderboardCache: { data: any[] | null, expires: number } = { data: null, ex
           </button>
         </div>
       )}
+
+      {/* Kill Feed Overlay */}
+      <div className="absolute right-4 bottom-24 sm:bottom-4 flex flex-col gap-1.5 pointer-events-none select-none z-30 max-w-xs">
+        <AnimatePresence>
+          {killFeed.map(item => (
+            <motion.div
+              key={item.id}
+              initial={{ opacity: 0, x: 50, scale: 0.9 }}
+              animate={{ opacity: 1, x: 0, scale: 1 }}
+              exit={{ opacity: 0, x: 100, scale: 0.9 }}
+              className="bg-black/80 border border-white/10 px-3 py-2 rounded-xl flex items-center justify-between gap-3 text-[11px] font-mono tracking-wide shadow-lg mr-2 max-w-[260px]"
+            >
+              <div className="flex items-center gap-1.5 truncate">
+                {item.killerName ? (
+                  <span className="text-red-400 font-bold truncate max-w-[95px]">{item.killerName}</span>
+                ) : (
+                  <span className="text-zinc-500 font-normal">Grid</span>
+                )}
+                <span className="text-white/40 text-[9px] uppercase">liq</span>
+                <span className="text-yellow-400 font-bold truncate max-w-[95px]">{item.victimName}</span>
+              </div>
+              <span className="bg-red-500/10 text-red-400 px-1 rounded-md text-[9px] uppercase border border-red-500/20">💥</span>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
     </div>
   );
 }

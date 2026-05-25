@@ -15,16 +15,31 @@ export function Orbs() {
     if (!gs) return;
 
     let i = 0;
+    const time = Date.now() * 0.005;
     for (const orbId in gs.orbs) {
       if (localCollectedOrbs.has(orbId)) continue;
       const orb = gs.orbs[orbId];
       dummy.position.set(orb.x, orb.y, 0.5);
-      const scale = orb.value >= 5 ? 2.5 : 1.0;
+      
+      let scale = orb.value >= 5 ? 2.5 : 1.0;
+      let actualColor = orb.color;
+
+      if (orb.type === 'magnet') {
+        actualColor = '#9d4edd';
+        scale = 1.6 + Math.sin(time + i) * 0.3;
+      } else if (orb.type === 'shield') {
+        actualColor = '#00f0ff';
+        scale = 1.6 + Math.sin(time * 1.2 + i) * 0.3;
+      } else if (orb.type === 'double') {
+        actualColor = '#ffb703';
+        scale = 1.6 + Math.sin(time * 0.8 + i) * 0.3;
+      }
+
       dummy.scale.setScalar(scale);
       dummy.updateMatrix();
       meshRef.current.setMatrixAt(i, dummy.matrix);
-      const actualColor = orb.color.startsWith('data:image') ? '#ffffff' : (orb.color === 'rainbow' || orb.color === 'chrome' ? '#ffffff' : (orb.color === 'neon' ? '#39ff14' : orb.color));
-      colorObj.set(actualColor);
+      const finalColor = actualColor.startsWith('data:image') ? '#ffffff' : (actualColor === 'rainbow' || actualColor === 'chrome' ? '#ffffff' : (actualColor === 'neon' ? '#39ff14' : actualColor));
+      colorObj.set(finalColor);
       meshRef.current.setColorAt(i, colorObj);
       i++;
     }

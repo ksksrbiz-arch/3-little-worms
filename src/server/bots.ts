@@ -16,7 +16,13 @@ interface BotAI {
 export const botsAI: Record<string, BotAI> = {};
 const TARGET_BOTS = 15;
 
-export function updateBots(state: GameState, delta: number, spawnOrb: (x: number, y: number, v: number, c: string, f: boolean) => void) {
+export function updateBots(
+  state: GameState,
+  delta: number,
+  spawnOrb: (x: number, y: number, v: number, c: string, f: boolean) => void,
+  onKill?: (victimId: string, killerId: string | null) => void,
+  onCollectOrb?: (orbId: string) => void
+) {
   let aliveBots = 0;
   
   // Build spatial hashes for this tick
@@ -70,7 +76,12 @@ export function updateBots(state: GameState, delta: number, spawnOrb: (x: number
       state: 'alive',
       currentAngle: angle,
       inputs: { left: false, right: false, boost: false },
-      isBot: true
+      isBot: true,
+      magnetTime: 0,
+      shieldTime: 0,
+      doubleTime: 0,
+      kills: 0,
+      killStreak: 0,
     };
     botsAI[id] = { targetId: null, targetType: null, reTargetTimer: 0 };
   }
@@ -286,27 +297,61 @@ export function updateBots(state: GameState, delta: number, spawnOrb: (x: number
        botPlayer.segments.pop();
     }
 
+    // Bot Magnetic Attraction
+    if (botPlayer.magnetTime > 0) {
+      const nearbyOrbsToPull = orbHash.query(newHead.x, newHead.y, 15);
+      for (const orb of nearbyOrbsToPull) {
+        const liveOrb = state.orbs[orb.id];
+        if (liveOrb) {
+          const dx = newHead.x - liveOrb.x;
+          const dy = newHead.y - liveOrb.y;
+          const dist = Math.sqrt(dx*dx + dy*dy);
+          if (dist > 1.5 && dist < 15) {
+            const pullFactor = 15 * delta;
+            liveOrb.x += (newHead.x - liveOrb.x) * (pullFactor / dist);
+            liveOrb.y += (newHead.y - liveOrb.y) * (pullFactor / dist);
+          }
+        }
+      }
+    }
+
     // Bot Collection of Orbs
     const nearbyOrbsColl = orbHash.query(newHead.x, newHead.y, 2);
     for (const orb of nearbyOrbsColl) {
-      if (state.orbs[orb.id]) {
+      const liveOrb = state.orbs[orb.id];
+      if (liveOrb) {
         const dx = newHead.x - orb.x;
         const dy = newHead.y - orb.y;
         if (dx*dx + dy*dy < 4) {
-            botPlayer.score += state.orbs[orb.id].value;
+            const multiplier = botPlayer.doubleTime > 0 ? 2 : 1;
+            botPlayer.score += liveOrb.value * multiplier;
+
+            if (liveOrb.type === 'magnet') {
+              botPlayer.magnetTime = 10;
+            } else if (liveOrb.type === 'shield') {
+              botPlayer.shieldTime = 15;
+            } else if (liveOrb.type === 'double') {
+              botPlayer.doubleTime = 10;
+            }
+
             delete state.orbs[orb.id];
+            if (onCollectOrb) {
+              onCollectOrb(orb.id);
+            }
         }
       }
     }
 
     // Bot Collision Check
     let collided = false;
+    let killerId: string | null = null;
     // 1. Players
     const nearbySegments = segmentHash.query(newHead.x, newHead.y, 2);
     for (const seg of nearbySegments) {
        if (seg.id === id) continue; // Ignore self
        const dx = newHead.x - seg.x;
        const dy = newHead.y - seg.y;
+       killerId = seg.id;
        if (dx*dx+dy*dy < 2.25) {
            collided = true;
            break;
@@ -328,7 +373,15 @@ export function updateBots(state: GameState, delta: number, spawnOrb: (x: number
     }
 
     if (collided) {
-        botPlayer.state = 'dead';
+        if (botPlayer.shieldTime > 0) {
+          botPlayer.shieldTime = 0;
+          botPlayer.currentAngle += Math.PI * 0.8;
+        } else {
+          botPlayer.state = 'dead';
+          if (onKill) {
+            onKill(id, killerId);
+          }
+        }
         botPlayer.segments.forEach((seg, i) => {
            if (i % 2 === 0) spawnOrb(seg.x, seg.y, 1, botPlayer.color, true);
         });

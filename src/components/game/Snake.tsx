@@ -8,6 +8,7 @@ export function Snake({ playerId, color, isLocal, name }: { playerId: string, co
   const bodyRef = useRef<THREE.InstancedMesh>(null);
   const headRef = useRef<THREE.Mesh>(null);
   const particlesRef = useRef<THREE.InstancedMesh>(null);
+  const shieldMeshRef = useRef<THREE.Mesh>(null);
 
   const getSkinProperties = (c: string) => {
     if (c.startsWith('data:image')) {
@@ -110,6 +111,18 @@ export function Snake({ playerId, color, isLocal, name }: { playerId: string, co
       uniforms.uBoost.value = THREE.MathUtils.lerp(uniforms.uBoost.value, 1.0, delta * 15);
     } else {
       uniforms.uBoost.value = THREE.MathUtils.lerp(uniforms.uBoost.value, 0.0, delta * 15);
+    }
+
+    // Shield Mesh Update
+    if (shieldMeshRef.current) {
+      if (player && player.shieldTime > 0) {
+        shieldMeshRef.current.visible = true;
+        shieldMeshRef.current.position.copy(headRef.current.position);
+        const pulse = 1.0 + Math.sin(state.clock.elapsedTime * 15.0) * 0.08;
+        shieldMeshRef.current.scale.setScalar(pulse);
+      } else {
+        shieldMeshRef.current.visible = false;
+      }
     }
 
     // Particles Update
@@ -236,6 +249,21 @@ export function Snake({ playerId, color, isLocal, name }: { playerId: string, co
         />
       </instancedMesh>
       
+      {/* Shield Energy Bubble */}
+      <mesh ref={shieldMeshRef} visible={false}>
+        <sphereGeometry args={[1.4, 32, 32]} />
+        <meshStandardMaterial
+          color="#00f0ff"
+          transparent
+          opacity={0.35}
+          roughness={0.1}
+          metalness={0.9}
+          emissive="#00f0ff"
+          emissiveIntensity={1.8}
+          toneMapped={false}
+        />
+      </mesh>
+
       {/* Particles */}
       {isLocal && (
         <instancedMesh ref={particlesRef} args={[null as any, null as any, 200]} frustumCulled={false}>
